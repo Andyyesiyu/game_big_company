@@ -42,14 +42,14 @@ const Input = {
     if (this.pressed[code]) { this.pressed[code] = false; return true; }
     return false;
   },
-  // arrow keys or the left stick (WASD are skills now)
+  // WASD / arrow keys, or the left stick
   moveVec() {
     let x = 0, y = 0;
     const k = this.keys;
-    if (k.ArrowLeft) x -= 1;
-    if (k.ArrowRight) x += 1;
-    if (k.ArrowUp) y -= 1;
-    if (k.ArrowDown) y += 1;
+    if (k.KeyA || k.ArrowLeft) x -= 1;
+    if (k.KeyD || k.ArrowRight) x += 1;
+    if (k.KeyW || k.ArrowUp) y -= 1;
+    if (k.KeyS || k.ArrowDown) y += 1;
     if (this.lstick) {
       const dx = this.lstick.x - this.lstick.ox, dy = this.lstick.y - this.lstick.oy;
       const m = Math.hypot(dx, dy);
@@ -69,7 +69,7 @@ const Input = {
   },
   init(canvas) {
     addEventListener('keydown', (e) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
       if (!this.keys[e.code]) this.pressed[e.code] = true;
       this.keys[e.code] = true;
     });
@@ -94,9 +94,9 @@ const Input = {
       for (const t of e.changedTouches) {
         const id = this.hitButton ? this.hitButton(t.clientX, t.clientY) : null;
         if (id) {
-          const skill = 'qwer'.includes(id);
+          const skill = 'qer'.includes(id);
           this.btn[t.identifier] = { id, skill, ox: t.clientX, oy: t.clientY, x: t.clientX, y: t.clientY };
-          if (id === 'atk') this.keys.btn_atk = true;
+          if (id === 'atk') { this.keys.btn_atk = true; this.pressed.btn_atk = true; }
           else if (!skill) this.pressed['btn_' + id] = true;
         } else if (!this.lstick && t.clientX < innerWidth * 0.6) {
           this.lstick = { id: t.identifier, ox: t.clientX, oy: t.clientY, x: t.clientX, y: t.clientY };

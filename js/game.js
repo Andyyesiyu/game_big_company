@@ -12,13 +12,23 @@ const Bank = {
 };
 const KITS = [
   { id: 'bare', icon: '📎', cost: 0, apply() {} },
-  { id: 'std', icon: '🪭', cost: 2000, apply(p) { p.weapon = 'fan'; p.armor = 50; p.tea = 2; } },
-  { id: 'pro', icon: '⌨️', cost: 6000, apply(p) { p.weapon = 'keyboard'; p.armor = 100; p.tea = 4; } },
+  { id: 'std', icon: '🪭', cost: 2000, apply(p) { p.weapon = 'fan'; p.armor = 50; p.tea = 3; } },
+  { id: 'pro', icon: '⌨️', cost: 6000, apply(p) { p.weapon = 'keyboard'; p.armor = 100; p.tea = 5; } },
 ];
+const Settings = {
+  fx: true, auto: true, // auto: switch the lighting off by itself if this device can't keep up
+  load() {
+    try { const v = localStorage.getItem('layoff_games_fx'); if (v !== null) this.fx = v === '1'; } catch (e) { /* ignore */ }
+    if (/[?&]fx=0/.test(location.search)) this.fx = false;
+    if (/[?&]fx=1/.test(location.search)) { this.fx = true; this.auto = false; }
+  },
+  save() { try { localStorage.setItem('layoff_games_fx', this.fx ? '1' : '0'); } catch (e) { /* ignore */ } },
+};
 const money = (n) => '¥' + Math.round(n).toLocaleString('en-US');
 
 // ---------- match flow ----------
-let canvas, DPR = 1;
+let canvas, DPR = 1, SDPR = 1; // the world renders at up to 1.5x; the HUD stays at full sharpness
+let hctx = null, sctx = null, sceneCv = null, glCv = null; // HUD canvas (also takes input), offscreen world canvas, WebGL output
 
 function startMatch(kit) {
   Bank.money -= kit.cost; Bank.save();
@@ -63,8 +73,11 @@ function playerDie() {
 function update(dt) {
   if (Input.take('Escape') || Input.take('KeyP') || Input.take('pauseBtn')) return showPause();
   const p = G.player;
-  G.time += dt;
-  updateZone(dt);
+  // perfect dodge: the world runs slow, you don't
+  const wdt = G.slowT > 0 ? dt * 0.28 : dt;
+  G.slowT = Math.max(0, G.slowT - dt);
+  G.time += wdt;
+  updateZone(wdt);
   if (!G.exitsOpen && G.time >= 40) {
     G.exitsOpen = true;
     for (const e of G.exits) e.open = true;
@@ -81,7 +94,7 @@ function update(dt) {
     if (!inside || b.down) b.aggro = false;
     else if (dist(p.x, p.y, b.x, b.y) < 300) b.aggro = true;
     if (b.aggro) near = b;
-    if (b !== G.boss) { b.t += dt; b.sayT -= dt; }
+    if (b !== G.boss) { b.t += dt; b.sayT -= dt; if (b.gone) runQueue(b, dt); } // a fired CEO still comes back if you wander off
   }
   if (near !== G.boss) {
     if (G.boss) clearHazards();
@@ -95,11 +108,11 @@ function update(dt) {
   }
   updateBullets(dt);
   updateUlts(dt);
-  updateEnemies(dt);
-  updateBoss(dt);
-  updateEBullets(dt);
-  updateZones(dt);
-  updateLasers(dt);
+  updateEnemies(wdt);
+  updateBoss(wdt);
+  updateEBullets(wdt);
+  updateZones(wdt);
+  updateLasers(wdt);
   updateContainers(dt);
   updatePickups(dt);
   updatePets(dt);
@@ -245,12 +258,19 @@ const PLAYER_LOOK = { top: '#4f7bf0', bottom: '#3b4a6b', skin: '#f6d3b3', hair: 
 function drawPlayer(p) {
   if (p.hp <= 0) return;
   shadow(p.x, p.y, p.r);
+  if (p.charge > 0.2) {
+    // winding up a spin attack: the ring shows how far it will reach
+    const c = p.charge / 1.2, ready = p.charge >= 0.45;
+    ctx.strokeStyle = ready ? `rgba(255,224,138,${0.6 + Math.sin(p.t * 22) * 0.3})` : 'rgba(255,255,255,0.4)'; ctx.lineWidth = ready ? 4 : 2;
+    groundEllipse(p.x, p.y, 115 + 55 * c); ctx.stroke();
+    if (ready && rand() < 0.5) part(p.x + rand(-18, 18), p.y, rand(4, 50), { vz: rand(60, 160), life: 0.4, color: '#ffe08a', size: 4, grav: -80, round: true });
+  }
   const w = WEAPONS[p.weapon];
   let wa = p.aim, ws = 1.25;
   if (p.swingT > 0) { const k = 1 - p.swingT / p.swingMax; wa = p.swingA + lerp(-w.arc, w.arc, clamp(k * 1.6, 0, 1)) * (p.chain === 2 ? -1 : 1); ws = 1.5; }
   ctx.globalAlpha = p.inv > 0 && p.dashT <= 0 && Math.floor(p.t * 22) % 2 ? 0.4 : p.hidden ? 0.72 : 1;
-  at(p.x, p.y, 0, (c) => drawPerson(c, Object.assign({}, PLAYER_LOOK, {
-    t: p.t, moving: p.moving, face: p.face, scared: p.hurtT > 0, armUp: p.castT > 0, plaid: p.armor > 0 ? 'rgba(255,255,255,0.4)' : null,
+  lit(p.x, p.y, 0, 150, 130, (c) => drawPerson(c, Object.assign({}, PLAYER_LOOK, {
+    t: p.t, moving: p.moving, face: p.face, scared: p.hurtT > 0, armUp: p.castT > 0 || p.charge > 0.3, plaid: p.armor > 0 ? 'rgba(255,255,255,0.4)' : null,
     extra: heldWeapon(wa, p.face, p.weapon, ws),
   })));
   ctx.globalAlpha = 1;
@@ -276,10 +296,9 @@ function drawEnemy(e) {
       c.beginPath(); c.moveTo(e.x, e.y); c.lineTo(e.x + Math.cos(e.dashA) * 250, e.y + Math.sin(e.dashA) * 250); c.stroke();
     });
   }
-  if (G.player.atkTarget === e) { ctx.strokeStyle = '#ff5a5f'; ctx.lineWidth = 2.5; groundEllipse(e.x, e.y, e.r + 8); ctx.stroke(); }
   shadow(e.x, e.y, e.r * (e.z > 10 ? 0.75 : 1) * (1 - rise * 0.5));
   ctx.globalAlpha = 1 - rise;
-  at(e.x, e.y, e.z + rise * 50, (c) => {
+  lit(e.x, e.y, e.z + rise * 50, 150, 150, (c) => {
     // hit flash: paint the whole figure white for a few frames and pop it slightly
     const fl = e.flash > 0 ? WHITE : null;
     if (fl) c.scale(1.1, 1.1);
@@ -328,7 +347,7 @@ function drawBullet(b) {
 function drawPet(q) {
   shadow(q.x, q.y, 12);
   ctx.strokeStyle = '#5df09a'; ctx.lineWidth = 2; groundEllipse(q.x, q.y, 17); ctx.stroke();
-  at(q.x, q.y, q.type === 'doubao' ? Math.abs(Math.sin(q.t * 5)) * 6 : 0, (c) => {
+  lit(q.x, q.y, q.type === 'doubao' ? Math.abs(Math.sin(q.t * 5)) * 6 : 0, 90, 90, (c) => {
     if (q.type === 'doubao') drawDoubao(c, q.t, q.face); else if (q.type === 'crab') drawCrab(c, q.moving ? q.t : 0, q.face); else drawGptBot(c, q.t, q.face);
   });
 }
@@ -351,8 +370,16 @@ function drawPickup(k) {
 
 function render() {
   const S = View.S, p = G.player, t = G.t;
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  // with the lighting pass on, the world goes to an offscreen canvas and through the shader
+  const fx = Post.ok && Settings.fx;
+  if (glCv.style.display !== (fx ? 'block' : 'none')) glCv.style.display = fx ? 'block' : 'none';
+  const rd = fx ? SDPR : DPR;
+  RENDER.k = S * rd;
+  ctx = fx ? sctx : hctx;
+  ctx.setTransform(rd, 0, 0, rd, 0, 0);
+  ctx.globalAlpha = 1;
   View.ox = rand(-1, 1) * View.shake; View.oy = rand(-1, 1) * View.shake;
+  setSun(G.day);
   drawTerrain(G.map, t);
   for (const e of G.exits) if (onScreen(e.x, e.y, 320)) drawExit(e, t);
   for (const z of G.zones) drawZone(z);
@@ -402,6 +429,14 @@ function render() {
   for (const b of G.ebullets) if (onScreen(b.x, b.y, 60)) list.push([b.y, () => { shadow(b.x, b.y, b.r * 0.8, 0.18); at(b.x, b.y, b.z, (c) => drawEnemyBullet(c, b)); }]);
   list.sort((a, b) => a[0] - b[0]);
   for (const it of list) it[1]();
+  const lk = p.lock;
+  if (lk && G.state === 'play') {
+    // lock-on marker: a bouncing arrow and a ring under the target
+    ctx.strokeStyle = '#ffcf4a'; ctx.lineWidth = 3; groundEllipse(lk.x, lk.y, lk.r + 9 + Math.sin(t * 8) * 2); ctx.stroke();
+    const ax = sx(lk.x), ay = sy(lk.y, (lk.z || 0) + (lk.def.attacks ? 128 : 96)) + Math.sin(t * 8) * 4 * S;
+    ctx.fillStyle = '#ffcf4a'; ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(ax - 9 * S, ay - 12 * S); ctx.lineTo(ax + 9 * S, ay - 12 * S); ctx.lineTo(ax, ay); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
 
   for (const q of G.parts) {
     ctx.globalAlpha = clamp(1 - q.t / q.life, 0, 1);
@@ -432,6 +467,16 @@ function render() {
     ctx.bezierCurveTo(x0 + len * 0.35, y0 - 16, x0 + len * 0.65, y0 + 16, x0 + len, y0 - 4);
     ctx.stroke();
   }
+  // motes of light drifting in the air
+  ctx.globalCompositeOperation = 'lighter';
+  for (const q of G.motes) {
+    const u = (q.x + t * q.v + Math.sin(t * 0.7 + q.ph) * 0.01) % 1, y = (q.y + Math.sin(t * 0.4 + q.ph) * 0.03 + 1) % 1, a = 0.4 + Math.sin(t * 1.6 + q.ph) * 0.35;
+    ctx.globalAlpha = a * 0.35; ctx.fillStyle = '#d8ff8a';
+    ctx.beginPath(); ctx.arc(u * View.W, y * View.H, q.s * 2.8, 0, TAU); ctx.fill();
+    ctx.globalAlpha = a; ctx.fillStyle = '#fbffd6';
+    ctx.beginPath(); ctx.arc(u * View.W, y * View.H, q.s, 0, TAU); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
 
   if (p.outside && G.state === 'play') {
@@ -443,9 +488,17 @@ function render() {
     ctx.fillStyle = `rgba(${G.flash.color},${G.flash.a * (G.flash.t / G.flash.max)})`;
     ctx.fillRect(0, 0, View.W, View.H);
   }
-  const vg = ctx.createRadialGradient(View.W / 2, View.H / 2, Math.min(View.W, View.H) * 0.5, View.W / 2, View.H / 2, Math.max(View.W, View.H) * 0.85);
-  vg.addColorStop(0, 'rgba(40,30,90,0)'); vg.addColorStop(1, 'rgba(40,30,90,0.3)');
-  ctx.fillStyle = vg; ctx.fillRect(0, 0, View.W, View.H);
+  if (fx) {
+    Post.draw(sceneCv, View.cam.x - View.ox / S, View.cam.y - View.oy / (S * YK), S * SDPR, YK, t, G.day, clamp(G.slowT * 2, 0, 1));
+    ctx = hctx;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, View.W, View.H);
+  } else {
+    if (G.slowT > 0) { ctx.fillStyle = `rgba(90,150,255,${0.22 * clamp(G.slowT * 2, 0, 1)})`; ctx.fillRect(0, 0, View.W, View.H); }
+    const vg = ctx.createRadialGradient(View.W / 2, View.H / 2, Math.min(View.W, View.H) * 0.5, View.W / 2, View.H / 2, Math.max(View.W, View.H) * 0.85);
+    vg.addColorStop(0, 'rgba(40,30,90,0)'); vg.addColorStop(1, 'rgba(40,30,90,0.3)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, View.W, View.H);
+  }
 
   if (G.state === 'play' || G.state === 'paused' || G.state === 'over') drawHUD();
 }
@@ -612,12 +665,13 @@ function skillButtons() {
   const W = View.W, H = View.H;
   if (Input.touch) {
     return [
-      { id: 'atk', x: W - 80, y: H - 96, r: 46 }, { id: 'q', x: W - 192, y: H - 84, r: 28 }, { id: 'w', x: W - 164, y: H - 174, r: 28 },
-      { id: 'e', x: W - 88, y: H - 212, r: 28 }, { id: 'r', x: W - 150, y: H - 264, r: 31 }, { id: 'd', x: W - 36, y: H - 266, r: 22 }, { id: 'tea', x: W - 36, y: H - 320, r: 22 },
+      { id: 'atk', x: W - 80, y: H - 96, r: 46 }, { id: 'q', x: W - 192, y: H - 84, r: 28 }, { id: 'e', x: W - 164, y: H - 174, r: 28 },
+      { id: 'r', x: W - 86, y: H - 214, r: 31 }, { id: 'd', x: W - 236, y: H - 160, r: 24 }, { id: 'tea', x: W - 34, y: H - 284, r: 22 },
     ];
   }
-  const u = clamp(Math.min(W, H) / 720, 0.72, 1.25), gap = 64 * u, y = H - 52 * u, x0 = W / 2 - gap * 2.5;
-  return ['q', 'w', 'e', 'r', 'd', 'tea'].map((id, i) => ({ id, x: x0 + i * gap + (i > 3 ? 14 * u : 0), y, r: (id === 'r' ? 29 : i > 3 ? 21 : 26) * u, key: 'QWERDF'[i] }));
+  const u = clamp(Math.min(W, H) / 720, 0.72, 1.25), gap = 66 * u, y = H - 52 * u, x0 = W / 2 - gap * 2;
+  const keys = { q: 'Q', e: 'E', r: 'R', d: 'Space', tea: 'F' };
+  return ['q', 'e', 'r', 'd', 'tea'].map((id, i) => ({ id, x: x0 + i * gap + (i > 2 ? 14 * u : 0), y, r: (id === 'r' ? 29 : i > 2 ? 22 : 26) * u, key: keys[id] }));
 }
 function drawSkillIcon(c, id) {
   ink(c, 1.6);
@@ -625,11 +679,7 @@ function drawSkillIcon(c, id) {
   else if (id === 'q') drawWeapon(c, 'pan', 1.5);
   else if (id === 'r') drawWeapon(c, 'book', 1.25);
   else if (id === 'tea') { c.scale(0.9, 0.9); drawLootIcon(c, { kind: 'tea' }); }
-  else if (id === 'w') {
-    c.fillStyle = '#ffcf4a'; c.beginPath();
-    for (let i = 0; i < 16; i++) { const r = i % 2 ? 6 : 15; c.lineTo(Math.cos((i / 16) * TAU) * r, Math.sin((i / 16) * TAU) * r); }
-    c.closePath(); c.fill(); c.stroke();
-  } else {
+  else {
     c.fillStyle = id === 'e' ? '#5cc8ff' : '#fff';
     for (const o of id === 'e' ? [-7, 3] : [-2]) poly(c, [o - 4, -10, o + 8, 0, o - 4, 10, o, 0], true);
   }
@@ -662,7 +712,7 @@ const UI = {
   refresh() { if (this.cur) this.show(this.cur); },
 };
 const fmtTime = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
-const optRow = () => `<div class="row"><button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button></div>`;
+const optRow = () => `<div class="row"><button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button></div>`;
 
 function showTitle() {
   if (!G.map || G.state !== 'menu') { genWorld(); initZone(); G.player = makePlayer(); G.player.x = G.player.y = -9999; }
@@ -727,6 +777,7 @@ function onAction(act, el) {
   else if (act === 'kit') startMatch(KITS[+el.dataset.i]);
   else if (act === 'lang') { LANG.zh = !LANG.zh; UI.refresh(); }
   else if (act === 'mute') { Sfx.muted = !Sfx.muted; UI.refresh(); }
+  else if (act === 'fx') { Settings.fx = !Settings.fx; Settings.save(); UI.refresh(); }
   else if (act === 'menu') showTitle();
   else if (act === 'resume') { G.state = 'play'; UI.hide(); }
 }
@@ -735,16 +786,30 @@ function onAction(act, el) {
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   View.W = innerWidth; View.H = innerHeight;
+  SDPR = Math.min(DPR, 1.5);
   canvas.width = Math.round(View.W * DPR); canvas.height = Math.round(View.H * DPR);
+  for (const c of [sceneCv, glCv]) { c.width = Math.round(View.W * SDPR); c.height = Math.round(View.H * SDPR); }
   const land = Math.min(View.W / 1150, View.H / 720);
   View.S = clamp(View.H > View.W ? Math.max(land, View.W / 640) : land, 0.42, 1.5);
 }
 
-let lastTs = 0;
+let lastTs = 0, fpsN = 0, fpsT = 0, fpsChecks = 0;
 function frame(ts) {
-  const dt = Math.min(0.033, (ts - lastTs) / 1000 || 0);
+  const raw = (ts - lastTs) / 1000 || 0, dt = Math.min(0.033, raw);
+  if (Settings.auto && Settings.fx && Post.ok && raw < 0.5) {
+    // watch the first few seconds: under ~18 fps means the shader is too heavy here
+    fpsN++; fpsT += raw;
+    if (fpsT >= 2) {
+      if (fpsN < 36) { Settings.fx = false; Settings.auto = false; UI.refresh(); }
+      else if (++fpsChecks >= 4) Settings.auto = false;
+      fpsN = 0; fpsT = 0;
+    }
+  }
   lastTs = ts;
   G.t += dt;
+  // noon at the drop, golden hour by the last circle
+  const dayGoal = G.state === 'menu' ? 0.3 + Math.sin(G.t * 0.05) * 0.3 : clamp((G.time - 60) / 230, 0, 1);
+  G.day = lerp(G.day, dayGoal, 0.02);
   if (G.state === 'play') {
     // hit-stop: the world freezes for a few frames on a solid hit
     if (G.hitstop > 0) { G.hitstop -= dt; updateFx(dt * 0.25); } else update(dt);
@@ -763,6 +828,14 @@ function boot() {
   UI.el = document.getElementById('ui');
   Input.init(canvas);
   Bank.load();
+  Settings.load();
+  hctx = ctx;
+  sceneCv = document.createElement('canvas');
+  sctx = sceneCv.getContext('2d');
+  glCv = document.getElementById('gl');
+  Post.init(glCv);
+  G.motes = [];
+  for (let i = 0; i < 44; i++) G.motes.push({ x: rand(), y: rand(), s: rand(1.2, 3), ph: rand(TAU), v: rand(0.008, 0.03) });
   resize();
   addEventListener('resize', resize);
   UI.el.addEventListener('click', (e) => {

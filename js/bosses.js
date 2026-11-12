@@ -67,18 +67,22 @@ function bossDown(b) {
   if (PET_OF[b.id]) addPet(PET_OF[b.id]);
 }
 
+// a boss's scheduled beats (attack steps, Sam's comeback)
+function runQueue(b, dt) {
+  if (!b.q.length) return;
+  for (const it of b.q) it.t -= dt;
+  const due = b.q.filter((i) => i.t <= 0);
+  b.q = b.q.filter((i) => i.t > 0);
+  for (const it of due) it.fn();
+}
+
 function updateBoss(dt) {
   const b = G.boss;
   if (!b) return;
   const d = b.def, p = G.player;
   HOME = b.home;
   b.t += dt; b.flash -= dt; b.sayT -= dt; b.contactCd -= dt;
-  if (b.q.length) {
-    for (const it of b.q) it.t -= dt;
-    const due = b.q.filter((i) => i.t <= 0);
-    b.q = b.q.filter((i) => i.t > 0);
-    for (const it of due) it.fn();
-  }
+  runQueue(b, dt);
   if (b.gone || b.down) return;
   if (b.reflect > 0) b.reflect -= dt;
   if (b.charge > 0) b.charge -= dt;
@@ -137,7 +141,7 @@ const summonAround = (b, type, n) => {
 const BOSSES = {
   // Floor 1 — the gauntlet snap that turns the headcount to dust.
   pony: {
-    hp: 1000, speed: 105, dist: 330, rest: 1.0, phaseAt: [0.5],
+    hp: 850, speed: 105, dist: 330, rest: 1.0, phaseAt: [0.5],
     look: { top: '#34466e', shirt: '#fff', bottom: '#2b3654', skin: '#f0c8a0', hair: '#1b1b1b', hairStyle: 'side', glasses: '#37474f', smile: true },
     onPhase(b) { say(b, T('q_pony_p2'), 2.4); Sfx.play('boss'); },
     attacks: [
@@ -182,7 +186,7 @@ const BOSSES = {
 
   // Floor 2 — the feed never ends.
   yiming: {
-    hp: 1200, speed: 118, dist: 340, rest: 0.9, phaseAt: [0.5],
+    hp: 1000, speed: 118, dist: 340, rest: 0.9, phaseAt: [0.5],
     look: { top: '#607d8b', bottom: '#263238', skin: '#f0c8a0', hair: '#1b1b1b', hairStyle: 'short', glasses: '#212121' },
     onPhase(b) { say(b, T('q_ym_p2'), 2.4); Sfx.play('boss'); },
     attacks: [
@@ -235,7 +239,7 @@ const BOSSES = {
 
   // Floor 3 — rockets, flames, a very angular truck.
   elon: {
-    hp: 1400, speed: 130, dist: 350, rest: 0.9, phaseAt: [0.5],
+    hp: 1200, speed: 130, dist: 350, rest: 0.9, phaseAt: [0.5],
     look: {
       top: '#2d2f3a', bottom: '#2d2f3a', skin: '#eec3a2', hair: '#3e2f25', hairStyle: 'side', smile: true,
       logo(c) { c.strokeStyle = '#eceff1'; c.lineWidth = 1.8; seg(c, -4, -31, 4, -21); seg(c, 4, -31, -4, -21); ink(c); },
@@ -310,7 +314,7 @@ const BOSSES = {
 
   // Floor 4 — fired by the board, back five days later.
   sam: {
-    hp: 900, speed: 125, dist: 330, rest: 0.9,
+    hp: 760, speed: 125, dist: 330, rest: 0.9,
     look: { top: '#8d9aa5', bottom: '#37474f', skin: '#f1cdb0', hair: '#5d4a3a', hairStyle: 'messy' },
     onDeath(b) {
       if (b.data.revived) return false;
@@ -322,7 +326,7 @@ const BOSSES = {
       banner(T('sam_fired'), T('sam_fired_sub'), 2.4, '#ffd54f');
       after(b, 2.6, () => banner(T('sam_days'), '', 1.6, '#b0bec5'));
       after(b, 4.4, () => {
-        b.gone = false; b.inv = false; b.maxhp = 650; b.hp = 650; b.phase = 2; b.busy = 0; b.cool = 1;
+        b.gone = false; b.inv = false; b.maxhp = 550; b.hp = 550; b.phase = 2; b.busy = 0; b.cool = 1;
         b.x = b.home.x + b.home.w / 2; b.y = b.home.y + 150;
         say(b, T('q_sam_back'), 2.6);
         banner(T('sam_back'), T('sam_back_sub'), 2, '#69f0ae');
@@ -378,7 +382,7 @@ const BOSSES = {
 
   // Floor 5 — the safety-first final boss, escalating one ASL at a time.
   dario: {
-    hp: 1600, speed: 105, dist: 340, rest: 0.9, phaseAt: [0.68, 0.36],
+    hp: 1350, speed: 105, dist: 340, rest: 0.9, phaseAt: [0.68, 0.36],
     look: { top: '#3f6fb5', shirt: '#e3f2fd', bottom: '#2b2f3a', skin: '#efc7a6', hair: '#3b2a20', hairStyle: 'curly', glasses: '#263238', smile: true },
     init(b) { b.orbs = 3; b.orbA = 0; },
     tick(b, dt) { b.orbA += dt * 1.7; },
@@ -496,7 +500,7 @@ function drawBoss(b) {
       c.fillStyle = '#fff'; c.fillRect(48, -26, 8, 3);
     });
   } else {
-    at(b.x, b.y, 0, (c) => {
+    lit(b.x, b.y, 0, 190, 190, (c) => {
       const look = Object.assign({}, d.look, b.flash > 0 ? WHITE : null, {
         t: b.t, moving: b.moving, face: b.face, scale: S, kneel: b.down, armUp: b.charge > 0 || (b.shield && !b.down), scared: b.down || b.stun > 0, smile: d.look.smile && !b.down,
       });

@@ -5,7 +5,7 @@ const G = {
   player: null, boss: null, bosses: [], map: null, zone: null,
   enemies: [], bullets: [], ebullets: [], zones: [], lasers: [], pickups: [],
   parts: [], floats: [], rings: [], obstacles: [], containers: [], exits: [], feed: [], wind: [], pets: [], slashes: [], ults: [],
-  hitstop: 0, combo: 0, comboT: 0,
+  hitstop: 0, combo: 0, comboT: 0, slowT: 0, day: 0,
   total: 30, kills: 0, signed: 0, exT: 0, exitsOpen: false, lastHit: '',
   flash: null, banner: null, boomCd: 0,
 };
@@ -18,7 +18,7 @@ const WEAPONS = {
   board: { tier: 3, dmg: 29, reach: 96, arc: 1.3, swing: 0.5, kb: 380, stun3: 0.6 },
   book: { tier: 4, dmg: 26, reach: 90, arc: 1.1, swing: 0.32, kb: 240, crit: 0.15 },
 };
-const SKILL_CD = { q: 5, w: 8, e: 6, r: 26, d: 2.5 };
+const SKILL_CD = { q: 5, e: 6, r: 26, d: 1.4 };
 
 const ENEMY = {
   hr: { hp: 34, speed: 122, r: 14, dmg: 10, kind: 'chaser' },
@@ -41,11 +41,11 @@ const VALS = [
 
 // The shrinking "optimization circle": hold, then shrink to radius r; dmg is per second outside it.
 const ZPH = [
-  { hold: 50, shrink: 35, r: 1500, dmg: 3 },
-  { hold: 40, shrink: 30, r: 950, dmg: 5 },
-  { hold: 35, shrink: 25, r: 520, dmg: 8 },
-  { hold: 28, shrink: 22, r: 230, dmg: 12 },
-  { hold: 18, shrink: 25, r: 0, dmg: 18 },
+  { hold: 50, shrink: 35, r: 1500, dmg: 2 },
+  { hold: 40, shrink: 30, r: 950, dmg: 4 },
+  { hold: 35, shrink: 25, r: 520, dmg: 6 },
+  { hold: 28, shrink: 22, r: 230, dmg: 9 },
+  { hold: 18, shrink: 25, r: 0, dmg: 14 },
 ];
 
 const POI_DEFS = [
@@ -183,16 +183,17 @@ function hasSight(ax, ay, bx, by) {
 }
 
 // ---------- map generation ----------
+// [deep shade, mid tone, sunlit]
 const TREE_PALS = [
-  ['#3f9a4a', '#5fc35a', '#a6ec7a'], ['#3f9a4a', '#5fc35a', '#a6ec7a'], ['#2f8a5a', '#48b574', '#8fe3a8'], ['#2f8a5a', '#48b574', '#8fe3a8'],
-  ['#e77aa5', '#f7a3c2', '#ffdbe8'], ['#dfa02c', '#f2c24e', '#ffe9a3'],
+  ['#1c4426', '#3d7a36', '#93c95c'], ['#1c4426', '#3d7a36', '#93c95c'], ['#1a4034', '#2f7560', '#7fcf9a'], ['#1f3d1f', '#4a7a2c', '#a9c95a'],
+  ['#7a3050', '#cf6c94', '#ffc4d8'], ['#7a4c12', '#d0922a', '#ffe08a'],
 ];
 function addContainer(x, y, kind, poi = null) {
   G.containers.push({ x, y, kind, poi, opened: false, prog: 0, need: { crate: 0.45, locker: 0.8, safe: 1.3 }[kind] });
 }
 function genWorld() {
-  const M = (G.map = { blobs: [], paths: [], plazas: [], ponds: [], grass: [], grassRows: [], tufts: [] });
-  Object.assign(G, { obstacles: [], containers: [], exits: [], bosses: [], enemies: [], bullets: [], pickups: [], parts: [], floats: [], rings: [], feed: [], ebullets: [], pets: [], slashes: [], ults: [], hitstop: 0, combo: 0, comboT: 0, boss: null });
+  const M = (G.map = { blobs: [], paths: [], stones: [], plazas: [], ponds: [], grass: [], grassRows: [], tufts: [] });
+  Object.assign(G, { obstacles: [], containers: [], exits: [], bosses: [], enemies: [], bullets: [], pickups: [], parts: [], floats: [], rings: [], feed: [], ebullets: [], pets: [], slashes: [], ults: [], hitstop: 0, combo: 0, comboT: 0, slowT: 0, boss: null });
   clearHazards();
   const C = { x: ARENA.w / 2, y: ARENA.h / 2 };
 
@@ -221,6 +222,15 @@ function genWorld() {
     M.paths.push([[e.x, e.y], [(e.x + best.x) / 2 + rand(-120, 120), (e.y + best.y) / 2 + rand(-120, 120)], [best.x, best.y]]);
   }
 
+  for (const pa of M.paths) {
+    for (let k = 0; k < pa.length - 1; k++) {
+      const a = pa[k], b = pa[k + 1], len = dist(a[0], a[1], b[0], b[1]), nx = -(b[1] - a[1]) / len, ny = (b[0] - a[0]) / len;
+      for (let d = 20; d < len; d += rand(52, 78)) {
+        const o = rand(-22, 22), x = lerp(a[0], b[0], d / len) + nx * o, y = lerp(a[1], b[1], d / len) + ny * o;
+        if (!inPlaza(x, y, 20)) M.stones.push({ x, y, rx: rand(22, 38), ry: rand(20, 34), rot: rand(TAU), c: pick(['#8e8f87', '#9c9b90', '#7f837c', '#a3a094']), moss: rand() < 0.35 });
+      }
+    }
+  }
   // small work sites: a shed, a couple of desks, a few boxes
   const sites = [];
   for (let i = 0; i < 400 && sites.length < 12; i++) {
@@ -245,7 +255,14 @@ function genWorld() {
     const s = clearSpot(60);
     if (s) G.obstacles.push({ k: 'rock', x: s.x, y: s.y, r: rand(22, 38) });
   }
-  const tree = (x, y) => { if (isClear(x, y, 46)) G.obstacles.push({ k: 'tree', x, y, r: 12, cr: rand(44, 68), pal: pick(TREE_PALS) }); };
+  const tree = (x, y) => {
+    if (!isClear(x, y, 46)) return;
+    // leaf clusters, back-to-front: lower-right (in shade) first, upper-left (in sun) last
+    const cl = [];
+    for (let i = 0; i < 11; i++) { const a = rand(TAU), d = Math.sqrt(rand()) * 0.6; cl.push({ dx: Math.cos(a) * d, dy: Math.sin(a) * d * 0.78, r: rand(0.32, 0.5), s: rand(0.4, 1) }); }
+    cl.sort((p, q) => (q.dy + q.dx * 0.4) - (p.dy + p.dx * 0.4));
+    G.obstacles.push({ k: 'tree', x, y, r: 12, cr: rand(46, 72), pal: pick(TREE_PALS), cl });
+  };
   for (let f = 0; f < 18; f++) {
     const fx = rand(200, ARENA.w - 200), fy = rand(200, ARENA.h - 200);
     for (let i = 0; i < randi(6, 11); i++) tree(fx + rand(-300, 300), fy + rand(-260, 260));
@@ -260,18 +277,18 @@ function genWorld() {
     M.grass.push(g);
     for (const j of [-0.6, -0.22, 0.16, 0.56]) {
       const hw = Math.sqrt(1 - j * j) * g.r, blades = [];
-      for (let dx = -hw; dx < hw; dx += 9) blades.push({ dx: dx + rand(-3, 3), h: rand(22, 34), c: pick(['#4fa83e', '#63c04c', '#7bd45c']) });
+      for (let dx = -hw; dx < hw; dx += 9) blades.push({ dx: dx + rand(-3, 3), h: rand(22, 34), c: pick(['#3b8232', '#519c40', '#6fb854']) });
       M.grassRows.push({ x: g.x, y: g.y + j * g.r, blades });
     }
   }
   for (let i = 0; i < 240; i++) {
-    M.blobs.push({ x: rand(ARENA.w), y: rand(ARENA.h), r: rand(120, 330), c: pick(['rgba(130,225,95,0.4)', 'rgba(70,170,75,0.2)', 'rgba(200,238,110,0.28)']) });
+    M.blobs.push({ x: rand(ARENA.w), y: rand(ARENA.h), r: rand(120, 330), c: pick(['rgba(120,180,78,0.38)', 'rgba(38,92,50,0.30)', 'rgba(150,178,84,0.26)', 'rgba(70,128,56,0.3)']) });
   }
   for (let i = 0; i < 1500; i++) {
     const x = rand(40, ARENA.w - 40), y = rand(40, ARENA.h - 40);
     if (inPlaza(x, y, 20) || M.ponds.some((o) => dist(x, y, o.x, o.y) < o.r + 20)) continue;
     const k = rand() < 0.7 ? 0 : rand() < 0.75 ? 1 : 2;
-    M.tufts.push({ x, y, k, c: k === 0 ? pick(['#63bd4c', '#a9e56f', '#55ad45']) : pick(['#fff', '#ffb3d1', '#b9a4ff', '#ffd76a']) });
+    M.tufts.push({ x, y, k, c: k === 0 ? pick(['#4c9440', '#86c25a', '#3c7c36']) : pick(['#fff', '#ffb3d1', '#b9a4ff', '#ffd76a']) });
   }
 }
 
@@ -307,11 +324,11 @@ function updateZone(dt) {
 // ---------- player ----------
 function makePlayer() {
   return {
-    x: 0, y: 0, z: 0, r: 14, hp: 100, maxhp: 100, armor: 0, tea: 1, speed: 255,
+    x: 0, y: 0, z: 0, r: 14, hp: 100, maxhp: 100, armor: 0, tea: 2, speed: 255,
     aim: -Math.PI / 2, aimD: 260, t: 0, moving: false, face: 1, vx: 0, vy: 0,
     dashT: 0, dashKind: '', dashDir: { x: 1, y: 0 }, dashHit: null, lungeT: 0, lvx: 0, lvy: 0,
     swingT: 0, swingMax: 1, swingA: 0, swingHit: true, chain: 0, chainT: 0, castT: 0, castKind: '',
-    cd: { q: 0, w: 0, e: 0, r: 0, d: 0 }, atkTarget: null, moveTo: null,
+    cd: { q: 0, e: 0, r: 0, d: 0 }, lock: null, moveTo: null, buf: 0, hold: 0, charge: 0, regenT: 0,
     inv: 0, hurtT: 0, fireT: 0, teaCd: 0, zoneT: 0, hidden: false, outside: false,
     weapon: 'stapler',
     loot: { value: 0, counts: [0, 0, 0, 0, 0, 0] },
@@ -321,8 +338,9 @@ function makePlayer() {
 function hurtPlayer(d, force, src) {
   const p = G.player;
   if (G.state !== 'play' || p.hp <= 0 || p.inv > 0 || (p.dashT > 0 && !force)) return false;
+  d *= 0.8; // everything hits a bit softer than it looks
   if (p.armor > 0) { const ab = Math.min(p.armor, d * 0.55); p.armor -= ab; d -= ab; }
-  p.hp -= d;
+  p.hp -= d; p.regenT = 0;
   p.inv = 0.45; p.hurtT = 0.3;
   G.exT = Math.max(0, G.exT - 1.2);
   G.lastHit = src || (G.boss && !G.boss.down ? bossName(G.boss) : T('by_pve'));
@@ -342,7 +360,7 @@ function useTea() {
   const p = G.player;
   if (p.tea <= 0 || p.teaCd > 0 || p.hp >= p.maxhp) return;
   p.tea--; p.teaCd = 1;
-  healPlayer(40);
+  healPlayer(50);
   burst(p.x, p.y, 40, 10, ['#f8e1c4', '#ff9aa2', '#fff'], { sp: 80, up: 160 });
   Sfx.play('pickup');
 }
@@ -419,10 +437,10 @@ function hitTarget(t, dmg, o) {
 }
 
 function startSwing(p) {
-  const w = WEAPONS[p.weapon], tg = p.atkTarget || pickTarget(p, w.reach + 150, !Input.touch);
+  const w = WEAPONS[p.weapon], tg = p.lock || pickTarget(p, w.reach + 150, !Input.touch);
   if (tg) {
     const d = dist(p.x, p.y, tg.x, tg.y), a = angTo(p.x, p.y, tg.x, tg.y);
-    if (Input.touch || p.atkTarget || Math.abs(angDiff(p.aim, a)) < 1.3) {
+    if (Input.touch || p.lock || Math.abs(angDiff(p.aim, a)) < 1.3) {
       p.aim = a;
       // close the gap so the blow lands
       const gap = Math.min(d - w.reach * 0.6 - tg.r, 115);
@@ -443,16 +461,16 @@ function resolveSwing(p) {
     if (inArc(p.x, p.y, a, reach, half, t)) hitTarget(t, w.dmg * (fin ? 1.5 : 1), { a: angTo(p.x, p.y, t.x, t.y), kb: w.kb * (fin ? 1.7 : 1), heavy: fin, stun: fin ? w.stun3 || 0 : 0 });
   });
 }
-// W: slam the floor, launching everything around you.
-function slam(p) {
-  const R = 140;
+// Charged attack: a spin that launches everything around you. c is the charge, 0.4 to 1.
+function slam(p, c) {
+  const R = 115 + 55 * c;
   ring(p.x, p.y, R, '#ffe08a', 0.4);
-  G.slashes.push({ x: p.x, y: p.y, a: 0, reach: R, half: Math.PI, t: 0, life: 0.28, col: '#ffe08a', fin: true, dir: 1 });
+  G.slashes.push({ x: p.x, y: p.y, a: p.aim, reach: R, half: Math.PI, t: 0, life: 0.3, col: '#ffe08a', fin: true, dir: 1 });
   burst(p.x, p.y, 4, 26, ['#fff', '#ffe08a', '#d9c98f'], { sp: 380, up: 320, life: 0.6, size: 7 });
-  View.shake = Math.max(View.shake, 11);
+  View.shake = Math.max(View.shake, 7 + 5 * c);
   Sfx.play('boom');
   forTargets((t) => {
-    if (dist(p.x, p.y, t.x, t.y) < R + t.r) hitTarget(t, 30 * power(p), { a: angTo(p.x, p.y, t.x, t.y), kb: 110, stun: 0.9, air: true, heavy: true });
+    if (dist(p.x, p.y, t.x, t.y) < R + t.r) hitTarget(t, (20 + 28 * c) * power(p), { a: angTo(p.x, p.y, t.x, t.y), kb: 140, stun: 0.5 + 0.5 * c, air: true, heavy: true });
   });
 }
 // R: Labor Arbitration. A very large book arrives from above.
@@ -476,55 +494,70 @@ function updateUlts(dt) {
   G.slashes = G.slashes.filter((s) => s.t < s.life);
 }
 
+// Is something about to land on you right now? A dodge that slips past it is a perfect dodge.
+function threatSoon(p) {
+  for (const e of G.enemies) {
+    if (e.dead || Math.abs(e.x - p.x) > 320) continue;
+    if (e.type === 'rival') {
+      const w = WEAPONS[e.w];
+      if (e.wind > 0 && e.wind < 0.32 && inArc(e.x, e.y, e.windA, w.reach + 30, w.arc + 0.25, p)) return true;
+      if ((e.dashT > 0 || (e.dashWind > 0 && e.dashWind < 0.24)) && distToSeg(p.x, p.y, e.x, e.y, e.x + Math.cos(e.dashA) * 260, e.y + Math.sin(e.dashA) * 260) < 50) return true;
+    } else if (!e.asleep && e.spawnT <= 0 && e.def.kind !== 'shooter' && e.atkCd <= 0.25 && dist(e.x, e.y, p.x, p.y) < e.r + p.r + 26) return true;
+  }
+  for (const z of G.zones) if (!z.done && z.delay - z.t < 0.32 && inZone(z, p.x, p.y, 4)) return true;
+  for (const b of G.ebullets) {
+    const dx = p.x - b.x, dy = p.y - b.y;
+    if (Math.hypot(dx, dy) < 80 && dx * b.vx + dy * b.vy > 0) return true;
+  }
+  return false;
+}
+
 function updatePlayer(dt) {
-  const p = G.player, z = G.zone, w = WEAPONS[p.weapon];
+  const p = G.player, z = G.zone;
   p.t += dt;
   p.inv = Math.max(0, p.inv - dt);
   p.hurtT = Math.max(0, p.hurtT - dt);
   p.fireT -= dt; p.teaCd -= dt; p.chainT -= dt;
   for (const k in p.cd) p.cd[k] = Math.max(0, p.cd[k] - dt);
   if ((G.comboT -= dt) <= 0) G.combo = 0;
+  // catch your breath: health creeps back once nothing has hit you for a while
+  if ((p.regenT += dt) > 6 && p.hp > 0 && p.hp < p.maxhp) p.hp = Math.min(p.maxhp, p.hp + 2.5 * dt);
   const free = p.castT <= 0 && p.dashT <= 0;
   const stick = Input.moveVec();
-  let mx = stick.x, my = stick.y, wantSwing = !!Input.keys.btn_atk;
-  let ground = null, body = null;
-
-  if (!Input.touch) {
-    // PC plays like a MOBA: right-click to move or to pick a target, left-click to swing at the cursor
-    ground = screenToWorld(Input.mouse.x, Input.mouse.y, 0);
-    body = screenToWorld(Input.mouse.x, Input.mouse.y, 26);
-    const rc = Input.take('rclick'), lc = Input.take('lclick') | Input.take('KeyA');
-    if (rc || lc) {
-      let tg = null, bd = lc ? 150 : 48;
-      forTargets((t) => { const d = dist(body.x, body.y, t.x, t.y) - t.r; if (d < bd) { bd = d; tg = t; } });
-      if (tg) { p.atkTarget = tg; p.moveTo = null; }
-      else if (rc) { p.atkTarget = null; p.moveTo = { x: ground.x, y: ground.y }; ring(ground.x, ground.y, 26, '#7df0a0', 0.3); }
-      else { p.atkTarget = null; p.moveTo = null; }
-    } else if (Input.mouse.rdown && !p.atkTarget) p.moveTo = { x: ground.x, y: ground.y };
-    if (Input.take('KeyS')) { p.moveTo = null; p.atkTarget = null; }
-    if (mx || my) { p.moveTo = null; p.atkTarget = null; }
-    if (Input.mouse.down && !p.atkTarget) { wantSwing = true; if (p.swingT <= 0 && free) p.aim = angTo(p.x, p.y, body.x, body.y); p.moveTo = null; }
-  }
-  // chase the chosen target and keep hitting it
-  const at = p.atkTarget;
-  if (at) {
-    if (at.dead || at.down || at.gone || at.hp <= 0) p.atkTarget = null;
-    else {
-      const d = dist(p.x, p.y, at.x, at.y), a = angTo(p.x, p.y, at.x, at.y);
-      if (d <= w.reach * 0.85 + at.r) { wantSwing = true; if (p.swingT <= 0 && free) p.aim = a; }
-      else { mx = Math.cos(a); my = Math.sin(a); }
-    }
-  } else if (p.moveTo) {
+  let mx = stick.x, my = stick.y;
+  if (mx || my) p.moveTo = null;
+  else if (p.moveTo) {
     const d = dist(p.x, p.y, p.moveTo.x, p.moveTo.y);
-    if (d < 10) p.moveTo = null;
-    else { mx = (p.moveTo.x - p.x) / d; my = (p.moveTo.y - p.y) / d; }
+    if (d < 10) p.moveTo = null; else { mx = (p.moveTo.x - p.x) / d; my = (p.moveTo.y - p.y) / d; }
   }
   const moving = Math.hypot(mx, my) > 0.1;
-  if (moving && free && p.swingT <= 0 && !wantSwing) p.aim = Math.atan2(my, mx);
+  const press = (btn, ...keys) => { let v = Input.take('btn_' + btn); for (const k of keys) v = Input.take(k) || v; return v; };
+  const body = Input.touch ? null : screenToWorld(Input.mouse.x, Input.mouse.y, 26);
 
-  // where a skill goes: the cursor on PC; a dragged direction or the nearest target on touch
+  // lock-on: right-click or Tab picks whoever is nearest the cursor (or nearest you)
+  if (press('lock', 'rclick', 'Tab')) {
+    if (p.lock) p.lock = null;
+    else {
+      let best = null, bd = 190;
+      if (body) forTargets((t) => { const d = dist(body.x, body.y, t.x, t.y); if (d < bd) { bd = d; best = t; } });
+      p.lock = best || pickTarget(p, 520, false);
+      if (p.lock) Sfx.play('ui');
+    }
+  }
+  const lk = p.lock;
+  if (lk && (lk.dead || lk.down || lk.gone || lk.hp <= 0 || dist(p.x, p.y, lk.x, lk.y) > 720)) p.lock = null;
+
+  const idle = free && p.swingT <= 0;
+  const aimCursor = () => {
+    if (p.lock) p.aim = angTo(p.x, p.y, p.lock.x, p.lock.y);
+    else if (body) p.aim = angTo(p.x, p.y, body.x, body.y);
+  };
+  if (idle) { if (p.lock) aimCursor(); else if (moving && p.charge <= 0) p.aim = Math.atan2(my, mx); }
+
+  // where a skill goes: your lock, else the cursor (PC) or a dragged direction / nearest target (touch)
   const aimSkill = (range) => {
-    if (!Input.touch) { p.aim = angTo(p.x, p.y, body.x, body.y); return { tg: null, d: dist(p.x, p.y, ground.x, ground.y) }; }
+    if (p.lock) { aimCursor(); return { tg: p.lock, d: dist(p.x, p.y, p.lock.x, p.lock.y) }; }
+    if (!Input.touch) { aimCursor(); return { tg: null, d: dist(p.x, p.y, body.x, body.y) }; }
     const ca = Input.castAim;
     Input.castAim = null;
     if (ca) { p.aim = ca.a; return { tg: null, d: ca.d * range }; }
@@ -532,35 +565,48 @@ function updatePlayer(dt) {
     if (tg) p.aim = angTo(p.x, p.y, tg.x, tg.y);
     return { tg, d: range * 0.6 };
   };
-  const press = (key, btn) => Input.take(key) | Input.take('btn_' + btn);
-  const begin = (k) => { p.cd[k] = SKILL_CD[k]; p.swingT = 0; p.lungeT = 0; p.fireT = 1.2; p.moveTo = null; };
+  const begin = (k) => { p.cd[k] = SKILL_CD[k]; p.swingT = 0; p.lungeT = 0; p.charge = 0; p.hold = 0; p.fireT = 1.2; };
 
-  if ((press('KeyD', 'd') | Input.take('Space')) && free && p.cd.d <= 0) {
-    const m = Math.hypot(mx, my);
-    if (!Input.touch && m < 0.1) p.aim = angTo(p.x, p.y, body.x, body.y);
-    p.dashDir = m > 0.1 ? { x: mx / m, y: my / m } : { x: Math.cos(p.aim), y: Math.sin(p.aim) };
-    p.dashT = 0.2; p.dashKind = 'd'; p.cd.d = SKILL_CD.d; p.swingT = 0;
-    Sfx.play('dash');
+  // attack: tap for the three-hit combo, hold to wind up a spin attack
+  const atkHeld = Input.mouse.down || !!Input.keys.KeyJ || !!Input.keys.btn_atk;
+  if (press('atk', 'lclick', 'KeyJ')) p.buf = 0.35;
+  if (p.buf > 0) {
+    p.buf -= dt;
+    if (idle && p.charge < 0.45) { p.buf = 0; if (!Input.touch) aimCursor(); startSwing(p); }
   }
-  if (press('KeyQ', 'q') && free && p.cd.q <= 0) {
+  if (atkHeld && idle) { if ((p.hold += dt) > 0.3) p.charge = Math.min(1.2, p.charge + dt); }
+  else if (!atkHeld) {
+    if (p.charge >= 0.45 && free) { p.swingT = 0; p.fireT = 1.2; p.castT = 0.16; p.castKind = 'spin'; slam(p, p.charge / 1.2); }
+    p.charge = 0; p.hold = 0;
+  }
+
+  // dodge: a hop with a moment of invulnerability; time it against an attack for a perfect dodge
+  if (press('d', 'Space') && free && p.cd.d <= 0) {
+    const m = Math.hypot(mx, my);
+    p.dashDir = m > 0.1 ? { x: mx / m, y: my / m } : { x: -Math.cos(p.aim), y: -Math.sin(p.aim) };
+    p.dashT = 0.22; p.dashKind = 'd'; p.cd.d = SKILL_CD.d; p.swingT = 0; p.charge = 0; p.hold = 0;
+    Sfx.play('dash');
+    if (threatSoon(p)) {
+      G.slowT = 1.8; p.cd.d = 0.35; p.inv = 0.6;
+      floater(p.x, p.y, 100, T('perfect'), '#8fe8ff', 24, 1.3);
+      G.flash = { color: '170,225,255', t: 0.35, max: 0.35, a: 0.4 };
+      Sfx.play('safe');
+    }
+  }
+  if (press('q', 'KeyQ', 'Digit1') && free && p.cd.q <= 0) {
     aimSkill(460); begin('q');
     p.castT = 0.12; p.castKind = 'q';
     G.bullets.push({ id: 'pan', x: p.x + Math.cos(p.aim) * 20, y: p.y + Math.sin(p.aim) * 20, z: 26, vx: Math.cos(p.aim) * 800, vy: Math.sin(p.aim) * 800, r: 13, dmg: 22 * power(p), life: 0.58, t: 0 });
     Sfx.play('slash');
   }
-  if (press('KeyW', 'w') && free && p.cd.w <= 0) {
-    Input.castAim = null; begin('w');
-    p.castT = 0.2; p.castKind = 'w';
-    Sfx.play('lob');
-  }
-  if (press('KeyE', 'e') && free && p.cd.e <= 0) {
+  if (press('e', 'KeyE', 'ShiftLeft', 'ShiftRight', 'Digit2') && free && p.cd.e <= 0) {
     aimSkill(330); begin('e');
     p.dashDir = { x: Math.cos(p.aim), y: Math.sin(p.aim) };
     p.dashT = 0.18; p.dashKind = 'e'; p.dashHit = new Set();
     G.slashes.push({ x: p.x, y: p.y, a: p.aim, reach: 270, half: 0.16, t: 0, life: 0.28, col: '#8fe8ff', fin: true, dir: 1, line: true });
     Sfx.play('dash'); Sfx.play('slash');
   }
-  if (press('KeyR', 'r') && free && p.cd.r <= 0) {
+  if (press('r', 'KeyR', 'Digit3') && free && p.cd.r <= 0) {
     const s = aimSkill(360), d = clamp(s.d, 60, 340);
     begin('r');
     G.ults.push({ x: s.tg ? s.tg.x : p.x + Math.cos(p.aim) * d, y: s.tg ? s.tg.y : p.y + Math.sin(p.aim) * d, t: 0, delay: 0.6, r: 170 });
@@ -569,16 +615,16 @@ function updatePlayer(dt) {
   }
   if (Input.take('KeyF') | Input.take('btn_tea')) useTea();
 
-  if (p.castT > 0 && (p.castT -= dt) <= 0 && p.castKind === 'w') slam(p);
+  if (p.castT > 0) p.castT -= dt;
   if (p.swingT > 0) {
     p.swingT -= dt;
     if (!p.swingHit && p.swingT <= p.swingMax * 0.55) { p.swingHit = true; resolveSwing(p); }
-  } else if (wantSwing && p.castT <= 0 && p.dashT <= 0) startSwing(p);
+  }
 
   let vx, vy;
   if (p.dashT > 0) {
     p.dashT -= dt;
-    const sp = p.dashKind === 'e' ? 1500 : 820;
+    const sp = p.dashKind === 'e' ? 1500 : 800;
     vx = p.dashDir.x * sp; vy = p.dashDir.y * sp;
     part(p.x, p.y, rand(8, 40), { vx: -vx * 0.06, vy: -vy * 0.06, life: 0.25, color: p.dashKind === 'e' ? '#8fe8ff' : '#fff', size: 8, grav: 0, round: true });
     if (p.dashKind === 'e') {
@@ -590,7 +636,7 @@ function updatePlayer(dt) {
     }
   } else if (p.lungeT > 0) { p.lungeT -= dt; vx = p.lvx; vy = p.lvy; }
   else {
-    const f = p.castT > 0 ? 0 : p.swingT > 0 ? 0.45 : 1, m = Math.max(1, Math.hypot(mx, my));
+    const f = p.castT > 0 ? 0 : p.swingT > 0 ? 0.45 : p.charge > 0 ? 0.55 : 1, m = Math.max(1, Math.hypot(mx, my));
     vx = (mx / m) * p.speed * f; vy = (my / m) * p.speed * f;
   }
   p.vx = vx; p.vy = vy;
@@ -603,7 +649,7 @@ function updatePlayer(dt) {
   // the optimization circle bites every half second
   p.outside = dist(p.x, p.y, z.x, z.y) > z.r;
   if (p.outside && (p.zoneT += dt) >= 0.5) {
-    p.zoneT = 0;
+    p.zoneT = 0; p.regenT = 0;
     p.hp -= zoneDmg() * 0.5;
     G.lastHit = T('by_zone');
     G.flash = { color: '190,80,255', t: 0.3, max: 0.3, a: 0.22 };
@@ -655,7 +701,7 @@ function updateBullets(dt) {
 function spawnEnemy(type, x, y) {
   const d = ENEMY[type];
   const e = {
-    type, def: d, x, y, z: 0, r: d.r, hp: d.hp, maxhp: d.hp, t: rand(10), spawnT: 0.6, aggro: 430,
+    type, def: d, x, y, z: 0, r: d.r, hp: d.hp, maxhp: d.hp, t: rand(10), spawnT: 0.6, aggro: 360,
     atkCd: rand(0.3, 0.8), shootCd: rand(1.2, 2.6), face: 1, flash: 0, kx: 0, ky: 0, strafe: pick([-1, 1]), stun: 0, air: 0,
   };
   G.enemies.push(e);
@@ -733,9 +779,9 @@ function updateEnemies(dt) {
 
 // ---------- rivals: the other 29 people after the one remaining headcount ----------
 const RIVAL_KITS = [
-  { hp: 85, armor: 0, sight: 400, spread: 0.2, tea: 0, speed: 185, ws: ['stapler', 'stapler', 'fan'], loot: [100, 700] },
-  { hp: 115, armor: 25, sight: 440, spread: 0.15, tea: 1, speed: 195, ws: ['fan', 'keyboard', 'fan'], loot: [500, 3000] },
-  { hp: 150, armor: 60, sight: 480, spread: 0.11, tea: 2, speed: 205, ws: ['keyboard', 'board', 'book'], loot: [2500, 9000] },
+  { hp: 80, armor: 0, sight: 340, spread: 0.2, tea: 0, speed: 185, ws: ['stapler', 'stapler', 'fan'], loot: [100, 700] },
+  { hp: 110, armor: 25, sight: 370, spread: 0.15, tea: 1, speed: 195, ws: ['fan', 'keyboard', 'fan'], loot: [500, 3000] },
+  { hp: 140, armor: 60, sight: 400, spread: 0.11, tea: 2, speed: 205, ws: ['keyboard', 'board', 'book'], loot: [2500, 9000] },
 ];
 const RIVAL_TITLES = [
   [['Intern', '实习生'], ['New grad', '校招生'], ['Contractor', '外包']],
@@ -808,7 +854,7 @@ function rivalFire(e, a, tg) {
 }
 // The wound-up swing lands: whoever is still inside the red wedge gets hit.
 function rivalSwing(e) {
-  const w = WEAPONS[e.w], a = e.windA, reach = w.reach + 6, p = G.player, dmg = Math.round(w.dmg * 0.9);
+  const w = WEAPONS[e.w], a = e.windA, reach = w.reach + 6, p = G.player, dmg = Math.round(w.dmg * 0.95);
   G.slashes.push({ x: e.x, y: e.y, a, reach, half: w.arc, t: 0, life: 0.18, col: '#ff8a8a', dir: 1 });
   if (p.hp > 0 && inArc(e.x, e.y, a, reach, w.arc, p)) hurtPlayer(dmg, false, rivalName(e));
   for (const o of G.enemies) {
@@ -827,7 +873,10 @@ function rivalThink(e) {
   let best = null, bd = e.sight;
   if (e.alertT > 0 && e.target && !e.target.dead && (e.target !== p || p.hp > 0)) { best = e.target; }
   else {
-    if (p.hp > 0 && G.time > 12) { // a short grace period after the drop
+    // a grace period after the drop, and never more than two rivals on you at once
+    let onYou = 0;
+    for (const o of G.enemies) if (o !== e && o.type === 'rival' && !o.dead && o.state === 'fight' && o.target === p) onYou++;
+    if (p.hp > 0 && G.time > 20 && (onYou < 2 || e.target === p)) {
       const d = dist(e.x, e.y, p.x, p.y);
       if (d < (p.hidden ? 150 : bd) && hasSight(e.x, e.y, p.x, p.y)) { best = p; bd = d; }
     }
@@ -909,7 +958,7 @@ function updateRival(e, dt) {
     return;
   }
   if (e.dashWind > 0) { if ((e.dashWind -= dt) <= 0) { e.dashT = 0.22; e.dashHit = false; if (onScreen(e.x, e.y, 100)) Sfx.play('dash'); } e.moving = false; return; }
-  if (e.wind > 0) { e.aim = e.windA; e.moving = false; if ((e.wind -= dt) <= 0) { rivalSwing(e); e.atkCd = rand(0.4, 0.75); } return; }
+  if (e.wind > 0) { e.aim = e.windA; e.moving = false; if ((e.wind -= dt) <= 0) { rivalSwing(e); e.atkCd = rand(0.7, 1.1); } return; }
   if (tg) {
     const d = dist(e.x, e.y, tg.x, tg.y), a = angTo(e.x, e.y, tg.x, tg.y);
     e.aim = a;
@@ -919,7 +968,7 @@ function updateRival(e, dt) {
       if (e.fireCd <= 0 && d < e.sight + 60) rivalFire(e, angTo(e.x, e.y, tg.x + (tg.vx || 0) * 0.25, tg.y + (tg.vy || 0) * 0.25), tg);
     } else {
       const w = WEAPONS[e.w], close = w.reach + tg.r - 6;
-      if (d < close && e.atkCd <= 0) { e.wind = 0.27 + w.swing * 0.45; e.windMax = e.wind; e.windA = a; }
+      if (d < close && e.atkCd <= 0) { e.wind = 0.4 + w.swing * 0.5; e.windMax = e.wind; e.windA = a; }
       else if (e.lvl === 2 && e.skillCd <= 0 && d > 150 && d < 300) { e.dashWind = 0.5; e.dashA = a; e.skillCd = rand(6, 9); }
       else {
         // step in to strike, drift back out while recovering
