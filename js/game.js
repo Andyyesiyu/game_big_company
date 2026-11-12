@@ -16,23 +16,28 @@ const KITS = [
   { id: 'pro', icon: '⌨️', cost: 6000, apply(p) { p.weapon = 'keyboard'; p.armor = 100; p.tea = 5; } },
 ];
 const Settings = {
-  fx: true, auto: true, // auto: switch the lighting off by itself if this device can't keep up
+  fx: true, auto: true, // auto: step down (3D -> 2D -> no lighting pass) by itself if this device can't keep up
+  mode3d: true,
   load() {
     try { const v = localStorage.getItem('layoff_games_fx'); if (v !== null) this.fx = v === '1'; } catch (e) { /* ignore */ }
     if (/[?&]fx=0/.test(location.search)) this.fx = false;
     if (/[?&]fx=1/.test(location.search)) { this.fx = true; this.auto = false; }
+    try { const v = localStorage.getItem('layoff_games_3d'); if (v !== null) this.mode3d = v === '1'; } catch (e) { /* ignore */ }
+    if (/[?&]mode=2d/.test(location.search)) this.mode3d = false;
+    if (/[?&]mode=3d/.test(location.search)) { this.mode3d = true; this.auto = false; }
   },
-  save() { try { localStorage.setItem('layoff_games_fx', this.fx ? '1' : '0'); } catch (e) { /* ignore */ } },
+  save() { try { localStorage.setItem('layoff_games_fx', this.fx ? '1' : '0'); localStorage.setItem('layoff_games_3d', this.mode3d ? '1' : '0'); } catch (e) { /* ignore */ } },
 };
 const money = (n) => '¥' + Math.round(n).toLocaleString('en-US');
 
 // ---------- match flow ----------
 let canvas, DPR = 1, SDPR = 1; // the world renders at up to 1.5x; the HUD stays at full sharpness
-let hctx = null, sctx = null, sceneCv = null, glCv = null; // HUD canvas (also takes input), offscreen world canvas, WebGL output
+let hctx = null, sctx = null, sceneCv = null, glCv = null, c3 = null; // HUD canvas (also takes input), offscreen world canvas, WebGL output
 
 function startMatch(kit) {
   Bank.money -= kit.cost; Bank.save();
   genWorld();
+  R3.build();
   initZone();
   const p = (G.player = makePlayer());
   for (let i = 0; i < 200; i++) {
@@ -551,7 +556,9 @@ function bar(x, y, w, h, u, color) {
 }
 // An arrow pinned to the screen edge, pointing at something off-screen.
 function edgeArrow(wx, wy, color, label) {
-  const px = sx(wx), py = sy(wy), W = View.W, H = View.H, m = 54;
+  const sp = toScreen(wx, wy), W = View.W, H = View.H, m = 54;
+  let px = sp.x, py = sp.y;
+  if (!sp.ok) { px = W / 2 + (wx - View.cam.x) * 50; py = H / 2 + (wy - View.cam.y) * 50; } // behind the 3D camera: just use its direction
   if (px > m && px < W - m && py > m + 40 && py < H - m - 40) return;
   const a = Math.atan2(py - H / 2, px - W / 2);
   const k = Math.min((W / 2 - m) / Math.abs(Math.cos(a) || 1e-6), (H / 2 - m - 40) / Math.abs(Math.sin(a) || 1e-6));
@@ -661,7 +668,11 @@ function drawHUD() {
       bar((W - w) / 2, H * 0.66 + 16 * u, w, 10 * u, G.exT / 5, '#3fe08a');
     }
     const kc = G.containers.find((k) => !k.opened && k.prog > 0);
-    if (kc) hudText(T('hud_search'), sx(kc.x), sy(kc.y, 96), 11 * u, '#fff', 'center');
+    if (kc) {
+      const s = toScreen(kc.x, kc.y, 96);
+      hudText(T('hud_search'), s.x, s.y, 11 * u, '#fff', 'center');
+      if (R3.on) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(s.x, s.y + 22 * u, 12 * u, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(kc.prog / kc.need, 0, 1)); ctx.stroke(); }
+    }
   }
 
   drawSkills(u);
@@ -689,6 +700,19 @@ function drawHUD() {
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.beginPath(); ctx.arc(s.ox + dx * k, s.oy + dy * k, 20, 0, TAU); ctx.fill();
   }
+}
+
+// a speech bubble at a screen position (the 3D overlay uses this)
+function bubbleAt(px, py, text) {
+  ctx.save();
+  ctx.font = `bold 15px ${FONT}`;
+  const w = ctx.measureText(text).width + 22, h = 30, x = clamp(px, w / 2 + 6, View.W - w / 2 - 6), y = Math.max(h, py - h);
+  ctx.fillStyle = '#fffdf4'; ctx.strokeStyle = INK; ctx.lineWidth = 2.4; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2, w, h, 12); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x - 6, y + h / 2 - 1); ctx.lineTo(x, y + h / 2 + 9); ctx.lineTo(x + 6, y + h / 2 - 1); ctx.fill();
+  ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y + 1);
+  ctx.restore();
 }
 
 // One layout shared by drawing and touch hit-testing.
@@ -744,10 +768,10 @@ const UI = {
   refresh() { if (this.cur) this.show(this.cur); },
 };
 const fmtTime = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
-const optRow = () => `<div class="row"><button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button></div>`;
+const optRow = () => `<div class="row"><button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="mode" ${R3.ok ? '' : 'disabled'}>${T(R3.on ? 'mode_3d' : 'mode_2d')}</button>${R3.on ? '' : `<button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button>`}</div>`;
 
 function showTitle() {
-  if (!G.map || G.state !== 'menu') { genWorld(); initZone(); G.player = makePlayer(); G.player.x = G.player.y = -9999; }
+  if (!G.map || G.state !== 'menu') { genWorld(); initZone(); G.player = makePlayer(); G.player.x = G.player.y = -9999; R3.build(); }
   G.state = 'menu'; G.result = null;
   UI.show(() => `
     <div class="kicker">${T('kicker')}</div>
@@ -810,6 +834,7 @@ function onAction(act, el) {
   else if (act === 'lang') { LANG.zh = !LANG.zh; UI.refresh(); }
   else if (act === 'mute') { Sfx.muted = !Sfx.muted; UI.refresh(); }
   else if (act === 'fx') { Settings.fx = !Settings.fx; Settings.save(); UI.refresh(); }
+  else if (act === 'mode') { R3.on = Settings.mode3d = !R3.on; Settings.auto = false; Settings.save(); UI.refresh(); }
   else if (act === 'menu') showTitle();
   else if (act === 'resume') { G.state = 'play'; UI.hide(); }
 }
@@ -821,6 +846,7 @@ function resize() {
   SDPR = Math.min(DPR, 1.5);
   canvas.width = Math.round(View.W * DPR); canvas.height = Math.round(View.H * DPR);
   for (const c of [sceneCv, glCv]) { c.width = Math.round(View.W * SDPR); c.height = Math.round(View.H * SDPR); }
+  R3.resize(View.W, View.H, DPR);
   const land = Math.min(View.W / 1150, View.H / 720);
   View.S = View.S0 = clamp(View.H > View.W ? Math.max(land, View.W / 640) : land, 0.42, 1.5);
 }
@@ -828,11 +854,11 @@ function resize() {
 let lastTs = 0, fpsN = 0, fpsT = 0, fpsChecks = 0;
 function frame(ts) {
   const raw = (ts - lastTs) / 1000 || 0, dt = Math.min(0.033, raw);
-  if (Settings.auto && Settings.fx && Post.ok && raw < 0.5) {
-    // watch the first few seconds: under ~18 fps means the shader is too heavy here
+  if (Settings.auto && raw < 2 && (R3.on || (Settings.fx && Post.ok))) { // (a gap over 2 s is a backgrounded tab, not a slow frame)
+    // watch the first few seconds: under ~18 fps means this is too heavy here, so step down a level
     fpsN++; fpsT += raw;
     if (fpsT >= 2) {
-      if (fpsN < 36) { Settings.fx = false; Settings.auto = false; UI.refresh(); }
+      if (fpsN < 36) { if (R3.on) R3.on = false; else { Settings.fx = false; Settings.auto = false; } fpsChecks = 0; UI.refresh(); }
       else if (++fpsChecks >= 4) Settings.auto = false;
       fpsN = 0; fpsT = 0;
     }
@@ -850,7 +876,18 @@ function frame(ts) {
     updateCamera(dt, ARENA.w / 2 + Math.sin(G.t * 0.07) * 1300, ARENA.h / 2 + Math.cos(G.t * 0.05) * 1100);
   } else if (G.state === 'over') updateFx(dt);
   else if (G.state === 'paused' && Input.take('Escape')) { G.state = 'play'; UI.hide(); }
-  render();
+  if (c3.style.display !== (R3.on ? 'block' : 'none')) c3.style.display = R3.on ? 'block' : 'none';
+  if (R3.on) {
+    // 3D: Three.js draws the world; this canvas only carries the HUD and the labels pinned to things
+    if (glCv.style.display !== 'none') glCv.style.display = 'none';
+    View.S = View.S0;
+    R3.frame(dt);
+    ctx = hctx;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, View.W, View.H);
+    if (G.flash) { ctx.fillStyle = `rgba(${G.flash.color},${G.flash.a * (G.flash.t / G.flash.max)})`; ctx.fillRect(0, 0, View.W, View.H); }
+    if (G.state === 'play' || G.state === 'paused' || G.state === 'over') { R3.overlay(); drawHUD(); }
+  } else render();
   requestAnimationFrame(frame);
 }
 
@@ -866,6 +903,9 @@ function boot() {
   sctx = sceneCv.getContext('2d');
   glCv = document.getElementById('gl');
   Post.init(glCv);
+  c3 = document.getElementById('c3');
+  R3.init(c3);
+  R3.on = R3.ok && Settings.mode3d;
   G.motes = [];
   for (let i = 0; i < 44; i++) G.motes.push({ x: rand(), y: rand(), s: rand(1.2, 3), ph: rand(TAU), v: rand(0.008, 0.03) });
   resize();

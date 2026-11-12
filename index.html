@@ -12,7 +12,7 @@
     font-family: "Trebuchet MS", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     user-select: none; -webkit-user-select: none; touch-action: none; overscroll-behavior: none; }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
-  #gl { display: none; pointer-events: none; }
+  #gl, #c3 { display: none; pointer-events: none; }
 
   #ui { position: fixed; inset: 0; display: none; padding: 16px; overflow-y: auto;
     background: radial-gradient(ellipse at center, rgba(42,36,56,0.25), rgba(42,36,56,0.62)); }
@@ -75,18 +75,22 @@
 </style>
 </head>
 <body>
+<canvas id="c3"></canvas>
 <canvas id="gl"></canvas>
 <canvas id="cv"></canvas>
 <div id="ui"></div>
 <div id="touch">
   <button id="tb-pause" aria-label="Pause">⏸</button>
 </div>
+<script src="vendor/three.min.js"></script>
 <script src="js/i18n.js"></script>
 <script src="js/core.js"></script>
 <script src="js/draw.js"></script>
 <script src="js/post.js"></script>
 <script src="js/world.js"></script>
 <script src="js/bosses.js"></script>
+<script src="js/r3world.js"></script>
+<script src="js/r3actors.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

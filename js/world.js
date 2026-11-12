@@ -661,7 +661,7 @@ function updatePlayer(dt) {
     vx = p.mvx; vy = p.mvy;
     if (Math.hypot(vx, vy) > p.speed * 0.8 && (p.stepT -= dt) <= 0) {
       p.stepT = 0.16;
-      part(p.x - vx * 0.03, p.y - vy * 0.03, 2, { vx: -vx * 0.12 + rand(-20, 20), vy: -vy * 0.12 + rand(-20, 20), vz: rand(30, 70), life: 0.35, color: 'rgba(235,225,200,0.7)', size: rand(6, 10), grav: 60, round: true });
+      part(p.x - vx * 0.03, p.y - vy * 0.03, 2, { vx: -vx * 0.12 + rand(-20, 20), vy: -vy * 0.12 + rand(-20, 20), vz: rand(30, 70), life: 0.35, color: '#ebe1c8', size: rand(6, 10), grav: 60, round: true });
     }
   }
   if (p.dashT > 0 || p.lungeT > 0) { p.mvx = vx * 0.3; p.mvy = vy * 0.3; }

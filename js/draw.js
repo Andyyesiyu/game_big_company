@@ -14,11 +14,14 @@ let ctx = null;
 
 const sx = (x) => (x - View.cam.x) * View.S + View.W / 2 + View.ox;
 const sy = (y, z = 0) => (y - View.cam.y) * View.S * YK + View.H / 2 - z * View.S + View.oy;
-const screenToWorld = (px, py, z = 0) => ({
+const screenToWorld = (px, py, z = 0) => (R3.on ? R3.unproject(px, py, z) : {
   x: (px - View.W / 2 - View.ox) / View.S + View.cam.x,
   y: (py - View.H / 2 - View.oy + z * View.S) / (View.S * YK) + View.cam.y,
 });
+// where a world point lands on screen, whichever renderer is drawing
+const toScreen = (x, y, z = 0) => (R3.on ? R3.project(x, y, z) : { x: sx(x), y: sy(y, z), ok: true });
 function onScreen(x, y, m = 160) {
+  if (R3.on) return Math.abs(x - View.cam.x) < 900 + m && Math.abs(y - View.cam.y) < 1100 + m;
   const px = sx(x), py = sy(y), k = m * View.S;
   return px > -k && px < View.W + k && py > -k && py < View.H + k * 2;
 }

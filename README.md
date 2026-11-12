@@ -1,7 +1,7 @@
 # The Layoff Games · 优化游戏 — Campus Royale / 产业园大逃杀
 
-A 2.5D action battle royale about the AI boom: melee combos, a lock-on, a dodge with a
-perfect-dodge slow-motion window, and a campus lit by a WebGL shader.
+A 3D action battle royale about the AI boom: melee combos, a lock-on, a dodge with a
+perfect-dodge slow-motion window, in a misty forest campus rendered with Three.js.
 Thirty employees drop into a tech campus and there is one headcount left.
 Search boxes, lockers and safes, stay inside the shrinking **optimization circle**,
 then either catch a shuttle out with everything in your bag or be the last one employed.
@@ -82,26 +82,38 @@ slip between them to get into melee range.
 
 ## How it's drawn
 
-Everything is drawn in code with Canvas 2D: figures go through a scratch canvas so a
-single soft light (warm upper-left, cool lower-right) can be laid over each one, tree
-canopies are built from shaded leaf clusters, and every object casts a shadow away from
-one sun whose angle lengthens from noon to dusk over a match. That picture is then run
-through one WebGL fragment shader (`js/post.js`): procedural grass and dirt texture,
-pools of dappled sunlight under drifting cloud shadow, mist, sun shafts, bloom, soft
-focus in the distance, film grain and the noon-to-dusk grade. The lighting pass can be
-switched off in the menu, and switches itself off if the device can't hold a frame rate.
+The simulation is a flat plane (x, y, plus a height), and two renderers can draw it.
+
+**3D (default).** `js/r3world.js` and `js/r3actors.js` draw the world with Three.js: a
+third-person chase camera looking north, a sun with soft shadow maps whose angle and
+colour run from noon to dusk over a match, exponential fog, instanced trees (smooth leaf
+clusters with a painted foliage texture), instanced wind-swayed grass, rocks, timber
+buildings with gabled roofs, lanterns and windows that light up towards evening, and
+characters built from capsules and spheres with procedural walk and attack animation.
+Every texture (ground, foliage, bark, rock, planks, roof tiles) is painted in code at
+start-up. A final full-screen shader adds bloom, sun shafts, the colour grade and grain.
+Trees and buildings between you and the camera shrink or turn glassy so you stay visible.
+The HUD, name tags and damage numbers are a 2D canvas layered on top.
+
+**2D (fallback).** The earlier Canvas 2D renderer (`js/draw.js`, plus the optional WebGL
+lighting pass in `js/post.js`) is still there. The game steps down to it by itself if the
+3D view can't hold a frame rate in the first few seconds, and you can switch either way
+with the Graphics button in the menu.
 
 ## Code map
 
 | File | What's in it |
 |---|---|
 | `js/core.js` | math helpers, mouse/keyboard input, touch stick and drag-to-aim buttons, tiny WebAudio synth |
-| `js/draw.js` | the 2.5D projection, sunlight and shadows, and all the art: characters, terrain, trees, buildings, loot |
-| `js/post.js` | the WebGL lighting pass |
+| `js/draw.js` | the 2D renderer: projection, sunlight and shadows, and all its art |
+| `js/post.js` | the WebGL lighting pass for the 2D renderer |
+| `js/r3world.js` | 3D renderer: scene, procedural textures, static world, camera, sun and fog, post shader |
+| `js/r3actors.js` | 3D renderer: character and creature rigs, per-frame sync of everything that moves, effects, the 2D overlay |
+| `vendor/three.min.js` | Three.js r149 (MIT), vendored so the game runs offline |
 | `js/world.js` | game state, map generation, action combat (combos, skills, hit feel), loot, rivals' AI, the circle, hazards, sidekicks |
 | `js/bosses.js` | boss framework plus the five attack decks |
 | `js/game.js` | match flow, render loop, HUD, skill buttons, minimap, menus, the severance fund |
 | `js/i18n.js` | every string, in English and Chinese |
 
-There are no image or audio assets. The earlier tower-climb and shooter versions of
+There are no image, model or audio assets. The earlier tower-climb and shooter versions of
 the game are in the git history.

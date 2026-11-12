@@ -13,6 +13,8 @@ const STR = {
   bank: ['Severance fund', '赔偿金存款'],
   ctl_desktop: ['WASD move · Left-click attack (hold to charge a spin) · Space dodge · Right-click or Tab lock on · Q E R skills · F bubble tea · Esc pause', 'WASD 移动 · 左键攻击（按住蓄力回旋斩）· 空格闪避 · 右键或 Tab 锁定目标 · Q E R 技能 · F 喝奶茶 · Esc 暂停'],
   ctl_touch: ['Touch: left stick moves; tap attack to combo, hold it to charge; drag a skill button to aim it', '触屏：左摇杆移动；点普攻连击，按住蓄力；按住技能键拖动可瞄准'],
+  mode_3d: ['Graphics: 3D', '画面：3D'],
+  mode_2d: ['Graphics: 2D', '画面：2D'],
   fx_on: ['Lighting: on', '光影：开'],
   fx_off: ['Lighting: off', '光影：关'],
   fx_na: ['Lighting: unavailable', '光影：不可用'],
