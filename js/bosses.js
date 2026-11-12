@@ -10,13 +10,14 @@ let HOME = { x: 0, y: 0, w: ARENA.w, h: ARENA.h };
 const cx = (x) => clamp(x, HOME.x + 60, HOME.x + HOME.w - 60);
 const cy = (y) => clamp(y, HOME.y + 70, HOME.y + HOME.h - 60);
 const bossName = (b) => T('n_' + b.id);
+const ORB_R = 122; // Dario's safeguards orbit out here: slip between them to get into melee range
 
 function makeBoss(id, home) {
   const d = BOSSES[id];
   const b = {
     id, def: d, home, x: home.x + home.w / 2, y: home.y + 130, z: 0, r: 24, hp: d.hp, maxhp: d.hp, t: rand(10), face: 1,
     q: [], busy: 0, cool: 1.6, phase: 1, flash: 0, say: null, sayT: 0, mode: 'orbit', orbitDir: pick([-1, 1]),
-    stun: 0, last: -1, contactCd: 0, charge: 0, reflect: 0, shield: null, data: {}, moving: false, met: false,
+    stun: 0, last: -1, contactCd: 0, crowd: 0, kx: 0, ky: 0, charge: 0, reflect: 0, shield: null, data: {}, moving: false, met: false,
   };
   if (d.init) d.init(b);
   return b;
@@ -100,7 +101,17 @@ function updateBoss(dt) {
     pushOut(b);
   }
   if (b.mode !== 'charge') b.face = p.x >= b.x ? 1 : -1;
-  if (dist(b.x, b.y, p.x, p.y) < b.r + p.r && b.contactCd <= 0 && hurtPlayer(b.mode === 'charge' ? 26 : 12, false, bossName(b))) b.contactCd = 0.7;
+  const dp = dist(b.x, b.y, p.x, p.y);
+  if (b.mode === 'charge' && dp < b.r + p.r + 6 && b.contactCd <= 0 && hurtPlayer(26, false, bossName(b))) b.contactCd = 0.7;
+  // stand in a CEO's personal space for too long and you get shoved out
+  b.crowd = dp < 115 ? b.crowd + dt : Math.max(0, b.crowd - dt * 0.5);
+  if (b.crowd > 1.6 && b.mode !== 'charge') { b.crowd = -1.4; zone(b.x, b.y, 140, 0.6, { look: 'red', dmg: 16 }); }
+  if (b.orbs && b.contactCd <= 0) {
+    for (let i = 0; i < b.orbs; i++) {
+      const a = b.orbA + (i / b.orbs) * TAU;
+      if (dist(p.x, p.y, b.x + Math.cos(a) * ORB_R, b.y + Math.sin(a) * ORB_R) < 18 + p.r && hurtPlayer(10, false, bossName(b))) { b.contactCd = 0.6; break; }
+    }
+  }
 
   if (b.busy > 0) b.busy -= dt;
   else if ((b.cool -= dt) <= 0) {
@@ -126,7 +137,7 @@ const summonAround = (b, type, n) => {
 const BOSSES = {
   // Floor 1 — the gauntlet snap that turns the headcount to dust.
   pony: {
-    hp: 700, speed: 105, dist: 330, rest: 1.0, phaseAt: [0.5],
+    hp: 1000, speed: 105, dist: 330, rest: 1.0, phaseAt: [0.5],
     look: { top: '#34466e', shirt: '#fff', bottom: '#2b3654', skin: '#f0c8a0', hair: '#1b1b1b', hairStyle: 'side', glasses: '#37474f', smile: true },
     onPhase(b) { say(b, T('q_pony_p2'), 2.4); Sfx.play('boss'); },
     attacks: [
@@ -171,7 +182,7 @@ const BOSSES = {
 
   // Floor 2 — the feed never ends.
   yiming: {
-    hp: 820, speed: 118, dist: 340, rest: 0.9, phaseAt: [0.5],
+    hp: 1200, speed: 118, dist: 340, rest: 0.9, phaseAt: [0.5],
     look: { top: '#607d8b', bottom: '#263238', skin: '#f0c8a0', hair: '#1b1b1b', hairStyle: 'short', glasses: '#212121' },
     onPhase(b) { say(b, T('q_ym_p2'), 2.4); Sfx.play('boss'); },
     attacks: [
@@ -224,7 +235,7 @@ const BOSSES = {
 
   // Floor 3 — rockets, flames, a very angular truck.
   elon: {
-    hp: 950, speed: 130, dist: 350, rest: 0.9, phaseAt: [0.5],
+    hp: 1400, speed: 130, dist: 350, rest: 0.9, phaseAt: [0.5],
     look: {
       top: '#2d2f3a', bottom: '#2d2f3a', skin: '#eec3a2', hair: '#3e2f25', hairStyle: 'side', smile: true,
       logo(c) { c.strokeStyle = '#eceff1'; c.lineWidth = 1.8; seg(c, -4, -31, 4, -21); seg(c, 4, -31, -4, -21); ink(c); },
@@ -299,7 +310,7 @@ const BOSSES = {
 
   // Floor 4 — fired by the board, back five days later.
   sam: {
-    hp: 600, speed: 125, dist: 330, rest: 0.9,
+    hp: 900, speed: 125, dist: 330, rest: 0.9,
     look: { top: '#8d9aa5', bottom: '#37474f', skin: '#f1cdb0', hair: '#5d4a3a', hairStyle: 'messy' },
     onDeath(b) {
       if (b.data.revived) return false;
@@ -311,7 +322,7 @@ const BOSSES = {
       banner(T('sam_fired'), T('sam_fired_sub'), 2.4, '#ffd54f');
       after(b, 2.6, () => banner(T('sam_days'), '', 1.6, '#b0bec5'));
       after(b, 4.4, () => {
-        b.gone = false; b.inv = false; b.maxhp = 450; b.hp = 450; b.phase = 2; b.busy = 0; b.cool = 1;
+        b.gone = false; b.inv = false; b.maxhp = 650; b.hp = 650; b.phase = 2; b.busy = 0; b.cool = 1;
         b.x = b.home.x + b.home.w / 2; b.y = b.home.y + 150;
         say(b, T('q_sam_back'), 2.6);
         banner(T('sam_back'), T('sam_back_sub'), 2, '#69f0ae');
@@ -367,7 +378,7 @@ const BOSSES = {
 
   // Floor 5 — the safety-first final boss, escalating one ASL at a time.
   dario: {
-    hp: 1100, speed: 105, dist: 340, rest: 0.9, phaseAt: [0.68, 0.36],
+    hp: 1600, speed: 105, dist: 340, rest: 0.9, phaseAt: [0.68, 0.36],
     look: { top: '#3f6fb5', shirt: '#e3f2fd', bottom: '#2b2f3a', skin: '#efc7a6', hair: '#3b2a20', hairStyle: 'curly', glasses: '#263238', smile: true },
     init(b) { b.orbs = 3; b.orbA = 0; },
     tick(b, dt) { b.orbA += dt * 1.7; },
@@ -462,7 +473,7 @@ function drawBoss(b) {
   if (b.orbs && !b.down) {
     for (let i = 0; i < b.orbs; i++) {
       const a = b.orbA + (i / b.orbs) * TAU;
-      orbs.push({ x: b.x + Math.cos(a) * 62, y: b.y + Math.sin(a) * 62, front: Math.sin(a) > 0 });
+      orbs.push({ x: b.x + Math.cos(a) * ORB_R, y: b.y + Math.sin(a) * ORB_R, front: Math.sin(a) > 0 });
     }
   }
   const drawOrb = (o) => at(o.x, o.y, 30, (c) => {
@@ -486,8 +497,7 @@ function drawBoss(b) {
     });
   } else {
     at(b.x, b.y, 0, (c) => {
-      if (b.flash > 0) c.filter = 'brightness(2.2)';
-      const look = Object.assign({}, d.look, {
+      const look = Object.assign({}, d.look, b.flash > 0 ? WHITE : null, {
         t: b.t, moving: b.moving, face: b.face, scale: S, kneel: b.down, armUp: b.charge > 0 || (b.shield && !b.down), scared: b.down || b.stun > 0, smile: d.look.smile && !b.down,
       });
       if (b.id === 'pony') look.extra = (cc, hx, hy) => drawGauntlet(cc, hx, hy, b.charge > 0 ? 1 - b.charge / 1.3 : 0);
@@ -496,7 +506,6 @@ function drawBoss(b) {
       if (b.id === 'elon') look.extra = (cc, hx, hy) => { cc.fillStyle = '#eceff1'; cc.beginPath(); cc.moveTo(hx + 2, hy - 16); cc.lineTo(hx + 5, hy - 4); cc.lineTo(hx - 1, hy - 4); cc.fill(); cc.fillStyle = '#ff7043'; cc.fillRect(hx, hy - 4, 4, 3 + Math.sin(b.t * 30) * 1.5); };
       if (b.id === 'dario') look.extra = (cc, hx, hy) => { cc.fillStyle = '#fff'; rr(cc, hx - 3, hy - 10, 9, 12, 1); cc.fillStyle = '#90a4ae'; for (let i = 0; i < 4; i++) cc.fillRect(hx - 2, hy - 8 + i * 2.5, 7, 1); };
       drawPerson(c, look);
-      c.filter = 'none';
     });
   }
   orbs.filter((o) => o.front).forEach(drawOrb);

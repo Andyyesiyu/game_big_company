@@ -306,14 +306,25 @@ function drawWeapon(c, id, s = 1) {
     c.fillStyle = '#f4f1ea';
     for (let i = 0; i < 5; i++) for (let j = 0; j < 2; j++) c.fillRect(-9 + i * 4, -3.4 + j * 4, 2.8, 2.8);
     c.fillStyle = '#ff6b6b'; c.fillRect(7, -3.4, 2.8, 2.8);
-  } else if (id === 'coffee') {
-    c.fillStyle = '#fff'; rrS(c, -5, -7, 10, 14, 2);
-    c.fillStyle = '#8a5a3c'; rr(c, -4.3, -2, 8.6, 5, 0);
-    c.fillStyle = '#5a3a28'; rrS(c, -6, -9, 12, 3, 1);
-  } else if (id === 'plane') {
+  } else if (id === 'fan') {
+    // a resignation letter, folded into a fan
     c.fillStyle = '#fdfdf8';
-    poly(c, [11, 0, -9, -7, -5, 0, -9, 7], true);
-    c.lineWidth = 0.8; seg(c, 11, 0, -5, 0);
+    c.beginPath(); c.moveTo(-7, 0); c.arc(-7, 0, 19, -0.95, 0.95); c.closePath(); c.fill(); c.stroke();
+    c.lineWidth = 0.9;
+    for (let i = -2; i <= 2; i++) seg(c, -7, 0, -7 + Math.cos(i * 0.38) * 19, Math.sin(i * 0.38) * 19);
+    c.fillStyle = '#e5484d'; c.beginPath(); c.arc(-7, 0, 6.5, -0.95, 0.95); c.lineTo(-7, 0); c.closePath(); c.fill();
+  } else if (id === 'board') {
+    // a whiteboard, swung by its stand
+    c.fillStyle = '#8d99b3'; rrS(c, -14, -1.6, 12, 3.2, 1.5);
+    c.fillStyle = '#fdfdf8'; rrS(c, -3, -11, 18, 22, 2);
+    c.strokeStyle = '#58a6ff'; c.lineWidth = 1.2; seg(c, 0, -6, 11, -6); seg(c, 0, -1, 8, -1);
+    c.strokeStyle = '#e5484d'; seg(c, 0, 5, 12, 2);
+  } else if (id === 'pan') {
+    // the blame, in wok form
+    c.fillStyle = '#6b4a35'; rrS(c, -17, -2, 11, 4, 2);
+    c.fillStyle = '#3b3550'; circS(c, 3, 0, 9.5);
+    c.fillStyle = '#5d5878'; circ(c, 3, 0, 6.2);
+    c.fillStyle = 'rgba(255,255,255,0.5)'; circ(c, 0.5, -2.5, 1.8);
   } else if (id === 'book') {
     c.fillStyle = '#c0392b'; rrS(c, -8, -10, 16, 20, 2);
     c.fillStyle = '#ffd54f'; c.fillRect(-7.3, -9.3, 2.5, 18.6);
@@ -329,9 +340,6 @@ function drawEnemyBullet(c, b) {
   if (b.owner) { c.fillStyle = 'rgba(255,70,70,0.35)'; circ(c, 0, 0, b.r + 5); }
   ink(c, 1.2);
   if (sh === 'staple') { c.rotate(a); c.fillStyle = '#ffd0d0'; rrS(c, -7, -2, 14, 4, 1.5); }
-  else if (sh === 'key') { c.rotate(b.t * 14); c.fillStyle = '#ffe1e1'; rrS(c, -4.5, -4.5, 9, 9, 2); }
-  else if (sh === 'plane') { c.rotate(a); drawWeapon(c, 'plane', 1.1); }
-  else if (sh === 'book') { c.rotate(b.t * 14); drawWeapon(c, 'book', 1.05); }
   else if (sh === 'env') {
     c.rotate(a);
     c.fillStyle = '#e5484d'; rrS(c, -8, -6, 16, 12, 2);

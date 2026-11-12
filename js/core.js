@@ -32,7 +32,8 @@ function distToSeg(px, py, ax, ay, bx, by) {
 const Input = {
   keys: {},
   pressed: {},
-  mouse: { x: 0, y: 0, down: false },
+  mouse: { x: 0, y: 0, down: false, rdown: false },
+  btn: {}, castAim: null, hitButton: null,
   touch: false,
   lstick: null,
   rstick: null,
@@ -41,13 +42,14 @@ const Input = {
     if (this.pressed[code]) { this.pressed[code] = false; return true; }
     return false;
   },
+  // arrow keys or the left stick (WASD are skills now)
   moveVec() {
     let x = 0, y = 0;
     const k = this.keys;
-    if (k.KeyA || k.ArrowLeft) x -= 1;
-    if (k.KeyD || k.ArrowRight) x += 1;
-    if (k.KeyW || k.ArrowUp) y -= 1;
-    if (k.KeyS || k.ArrowDown) y += 1;
+    if (k.ArrowLeft) x -= 1;
+    if (k.ArrowRight) x += 1;
+    if (k.ArrowUp) y -= 1;
+    if (k.ArrowDown) y += 1;
     if (this.lstick) {
       const dx = this.lstick.x - this.lstick.ox, dy = this.lstick.y - this.lstick.oy;
       const m = Math.hypot(dx, dy);
@@ -57,6 +59,14 @@ const Input = {
     if (m > 1) { x /= m; y /= m; }
     return { x, y };
   },
+  // a skill button being dragged to aim, if any
+  drag() {
+    for (const id in this.btn) {
+      const b = this.btn[id];
+      if (b.skill && Math.hypot(b.x - b.ox, b.y - b.oy) > 16) return b;
+    }
+    return null;
+  },
   init(canvas) {
     addEventListener('keydown', (e) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
@@ -64,42 +74,56 @@ const Input = {
       this.keys[e.code] = true;
     });
     addEventListener('keyup', (e) => { this.keys[e.code] = false; });
-    addEventListener('blur', () => { this.keys = {}; this.mouse.down = false; });
+    addEventListener('blur', () => { this.keys = {}; this.mouse.down = false; this.mouse.rdown = false; });
     canvas.addEventListener('mousemove', (e) => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; });
     canvas.addEventListener('mousedown', (e) => {
       this.mouse.x = e.clientX; this.mouse.y = e.clientY;
-      if (e.button === 0) this.mouse.down = true;
-      if (e.button === 2) this.pressed.Space = true;
+      if (e.button === 0) { this.mouse.down = true; this.pressed.lclick = true; }
+      if (e.button === 2) { this.mouse.rdown = true; this.pressed.rclick = true; }
     });
-    addEventListener('mouseup', (e) => { if (e.button === 0) this.mouse.down = false; });
+    addEventListener('mouseup', (e) => { if (e.button === 0) this.mouse.down = false; if (e.button === 2) this.mouse.rdown = false; });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('wheel', (e) => { this.wheel += Math.sign(e.deltaY); e.preventDefault(); }, { passive: false });
 
+    // Touch: left stick to move; the on-canvas buttons attack and cast.
+    // Skill buttons fire on release, so you can drag one to aim it first.
     const tstart = (e) => {
       e.preventDefault();
       this.touch = true;
       document.body.classList.add('touch');
       for (const t of e.changedTouches) {
-        if (t.clientX < innerWidth / 2 && !this.lstick) {
+        const id = this.hitButton ? this.hitButton(t.clientX, t.clientY) : null;
+        if (id) {
+          const skill = 'qwer'.includes(id);
+          this.btn[t.identifier] = { id, skill, ox: t.clientX, oy: t.clientY, x: t.clientX, y: t.clientY };
+          if (id === 'atk') this.keys.btn_atk = true;
+          else if (!skill) this.pressed['btn_' + id] = true;
+        } else if (!this.lstick && t.clientX < innerWidth * 0.6) {
           this.lstick = { id: t.identifier, ox: t.clientX, oy: t.clientY, x: t.clientX, y: t.clientY };
-        } else if (!this.rstick) {
-          this.rstick = { id: t.identifier, ox: t.clientX, oy: t.clientY, x: t.clientX, y: t.clientY };
         }
       }
     };
     const tmove = (e) => {
       e.preventDefault();
       for (const t of e.changedTouches) {
-        for (const s of [this.lstick, this.rstick]) {
-          if (s && s.id === t.identifier) { s.x = t.clientX; s.y = t.clientY; }
-        }
+        if (this.lstick && this.lstick.id === t.identifier) { this.lstick.x = t.clientX; this.lstick.y = t.clientY; }
+        const b = this.btn[t.identifier];
+        if (b) { b.x = t.clientX; b.y = t.clientY; }
       }
     };
     const tend = (e) => {
       e.preventDefault();
       for (const t of e.changedTouches) {
         if (this.lstick && this.lstick.id === t.identifier) this.lstick = null;
-        if (this.rstick && this.rstick.id === t.identifier) this.rstick = null;
+        const b = this.btn[t.identifier];
+        if (!b) continue;
+        delete this.btn[t.identifier];
+        if (b.id === 'atk') this.keys.btn_atk = false;
+        else if (b.skill) {
+          const dx = b.x - b.ox, dy = b.y - b.oy, m = Math.hypot(dx, dy);
+          this.castAim = m > 16 ? { a: Math.atan2(dy / 0.62, dx), d: Math.min(1, m / 80) } : null;
+          this.pressed['btn_' + b.id] = true;
+        }
       }
     };
     canvas.addEventListener('touchstart', tstart, { passive: false });
@@ -155,7 +179,7 @@ const Sfx = {
       case 'lob': this.tone(300, 0.18, 'sine', 0.05, 200); break;
       case 'plane': this.tone(1100, 0.09, 'triangle', 0.04, -500); break;
       case 'book': this.tone(160, 0.14, 'sawtooth', 0.05, -60); break;
-      case 'hit': this.tone(220, 0.05, 'square', 0.03, -80); break;
+      case 'hit': this.noise(0.05, 0.07, 0, 900); this.tone(190, 0.07, 'square', 0.05, -90); break;
       case 'kill': this.tone(420, 0.1, 'square', 0.04, -300); this.noise(0.08, 0.04); break;
       case 'hurt': this.tone(140, 0.2, 'sawtooth', 0.08, -80); this.noise(0.12, 0.06); break;
       case 'dash': this.noise(0.12, 0.05, 0, 1800); break;
@@ -170,6 +194,9 @@ const Sfx = {
       case 'dead': [400, 300, 200, 120].forEach((f, i) => this.tone(f, 0.22, 'sawtooth', 0.06, 0, i * 0.16)); break;
       case 'laser': this.tone(200, 0.3, 'sawtooth', 0.04, 300); break;
       case 'ui': this.tone(740, 0.05, 'square', 0.03); break;
+      case 'slash': this.noise(0.09, 0.06, 0, 2200); this.tone(520, 0.08, 'sawtooth', 0.025, -360); break;
+      case 'hit2': this.noise(0.12, 0.11, 0, 400); this.tone(120, 0.16, 'square', 0.09, -70); break;
+      case 'ult': this.noise(0.5, 0.16); this.tone(70, 0.5, 'sine', 0.14, -30); this.tone(240, 0.25, 'square', 0.06, -150); break;
       case 'open': this.noise(0.1, 0.05, 0, 1200); this.tone(520, 0.08, 'triangle', 0.05, 200, 0.05); break;
     }
   },

@@ -4,19 +4,21 @@ const G = {
   state: 'menu', t: 0, time: 0,
   player: null, boss: null, bosses: [], map: null, zone: null,
   enemies: [], bullets: [], ebullets: [], zones: [], lasers: [], pickups: [],
-  parts: [], floats: [], rings: [], obstacles: [], containers: [], exits: [], feed: [], wind: [], pets: [],
+  parts: [], floats: [], rings: [], obstacles: [], containers: [], exits: [], feed: [], wind: [], pets: [], slashes: [], ults: [],
+  hitstop: 0, combo: 0, comboT: 0,
   total: 30, kills: 0, signed: 0, exT: 0, exitsOpen: false, lastHit: '',
   flash: null, banner: null, boomCd: 0,
 };
 
+// Melee weapons. Better tiers replace what you hold; tier also scales your skills.
 const WEAPONS = {
-  stapler: { cd: 0.2, dmg: 10, speed: 780, ammo: Infinity },
-  keyboard: { cd: 0.55, dmg: 8, speed: 700, ammo: 36, pellets: 6, spread: 0.5 },
-  coffee: { cd: 0.75, dmg: 42, speed: 440, ammo: 14, aoe: 88 },
-  plane: { cd: 0.3, dmg: 20, speed: 920, ammo: 32, pierce: 4 },
-  book: { cd: 0.9, dmg: 34, speed: 640, ammo: 12 },
+  stapler: { tier: 0, dmg: 12, reach: 64, arc: 0.95, swing: 0.26, kb: 150 },
+  fan: { tier: 1, dmg: 15, reach: 80, arc: 1.25, swing: 0.29, kb: 150 },
+  keyboard: { tier: 2, dmg: 21, reach: 86, arc: 1.05, swing: 0.38, kb: 300 },
+  board: { tier: 3, dmg: 29, reach: 96, arc: 1.3, swing: 0.5, kb: 380, stun3: 0.6 },
+  book: { tier: 4, dmg: 26, reach: 90, arc: 1.1, swing: 0.32, kb: 240, crit: 0.15 },
 };
-const WEAPON_IDS = ['keyboard', 'coffee', 'plane', 'book'];
+const SKILL_CD = { q: 5, w: 8, e: 6, r: 26, d: 2.5 };
 
 const ENEMY = {
   hr: { hp: 34, speed: 122, r: 14, dmg: 10, kind: 'chaser' },
@@ -190,7 +192,7 @@ function addContainer(x, y, kind, poi = null) {
 }
 function genWorld() {
   const M = (G.map = { blobs: [], paths: [], plazas: [], ponds: [], grass: [], grassRows: [], tufts: [] });
-  Object.assign(G, { obstacles: [], containers: [], exits: [], bosses: [], enemies: [], bullets: [], pickups: [], parts: [], floats: [], rings: [], feed: [], ebullets: [], pets: [], boss: null });
+  Object.assign(G, { obstacles: [], containers: [], exits: [], bosses: [], enemies: [], bullets: [], pickups: [], parts: [], floats: [], rings: [], feed: [], ebullets: [], pets: [], slashes: [], ults: [], hitstop: 0, combo: 0, comboT: 0, boss: null });
   clearHazards();
   const C = { x: ARENA.w / 2, y: ARENA.h / 2 };
 
@@ -307,8 +309,11 @@ function makePlayer() {
   return {
     x: 0, y: 0, z: 0, r: 14, hp: 100, maxhp: 100, armor: 0, tea: 1, speed: 255,
     aim: -Math.PI / 2, aimD: 260, t: 0, moving: false, face: 1, vx: 0, vy: 0,
-    dashT: 0, dashCd: 0, dashDir: { x: 1, y: 0 }, inv: 0, hurtT: 0, fireCd: 0, fireT: 0, teaCd: 0, zoneT: 0, hidden: false, outside: false,
-    weapons: [{ id: 'stapler', ammo: Infinity }], wi: 0,
+    dashT: 0, dashKind: '', dashDir: { x: 1, y: 0 }, dashHit: null, lungeT: 0, lvx: 0, lvy: 0,
+    swingT: 0, swingMax: 1, swingA: 0, swingHit: true, chain: 0, chainT: 0, castT: 0, castKind: '',
+    cd: { q: 0, w: 0, e: 0, r: 0, d: 0 }, atkTarget: null, moveTo: null,
+    inv: 0, hurtT: 0, fireT: 0, teaCd: 0, zoneT: 0, hidden: false, outside: false,
+    weapon: 'stapler',
     loot: { value: 0, counts: [0, 0, 0, 0, 0, 0] },
   };
 }
@@ -342,11 +347,12 @@ function useTea() {
   Sfx.play('pickup');
 }
 function giveWeapon(id) {
-  const p = G.player, cap = WEAPONS[id].ammo;
-  let w = p.weapons.find((k) => k.id === id);
-  if (w) w.ammo = Math.min(cap * 2, w.ammo + Math.ceil(cap * 0.6));
-  else { w = { id, ammo: cap }; p.weapons.push(w); p.wi = p.weapons.length - 1; }
-  floater(p.x, p.y, 80, T('w_' + id), '#ffe08a', 16, 1.4);
+  const p = G.player;
+  if (WEAPONS[id].tier <= WEAPONS[p.weapon].tier) return false;
+  p.weapon = id;
+  floater(p.x, p.y, 84, T('w_' + id), TIER[WEAPONS[id].tier], 18, 1.5);
+  ring(p.x, p.y, 60, TIER[WEAPONS[id].tier], 0.4);
+  return true;
 }
 
 function nearestTarget(x, y, range) {
@@ -363,62 +369,236 @@ function nearestTarget(x, y, range) {
   }
   return best;
 }
-function switchWeapon(p, dir) {
-  p.wi = (p.wi + dir + p.weapons.length) % p.weapons.length;
-  Sfx.play('ui');
+// ---------- action combat ----------
+function forTargets(fn) {
+  for (const e of G.enemies) if (!e.dead && e.spawnT <= 0) fn(e);
+  const b = G.boss;
+  if (b && !b.gone && !b.down) fn(b);
+}
+// Closest thing worth hitting; with aimBias, things near the cursor direction win.
+function pickTarget(p, range, aimBias) {
+  let best = null, bs = 1e9;
+  forTargets((t) => {
+    const d = dist(p.x, p.y, t.x, t.y) - t.r;
+    if (d > range) return;
+    const s = d + (aimBias ? Math.abs(angDiff(p.aim, angTo(p.x, p.y, t.x, t.y))) * 90 : 0);
+    if (s < bs) { bs = s; best = t; }
+  });
+  return best;
+}
+function inArc(px, py, a, reach, half, t) {
+  const d = dist(px, py, t.x, t.y);
+  if (d > reach + t.r) return false;
+  return d < t.r + 12 || Math.abs(angDiff(a, angTo(px, py, t.x, t.y))) <= half;
+}
+const power = (p) => 1 + WEAPONS[p.weapon].tier * 0.15;
+
+// Every hit you land goes through here: this is where the impact is sold.
+function hitTarget(t, dmg, o) {
+  const p = G.player, isBoss = !!t.def.attacks;
+  if (isBoss && t.reflect > 0) {
+    floater(t.x, t.y, 110, T('reflected'), '#ffd180', 16, 0.9);
+    p.inv = 0; hurtPlayer(8, true, bossName(t));
+    return false;
+  }
+  const crit = !o.nocrit && rand() < 0.15 + (WEAPONS[p.weapon].crit || 0);
+  dmg = Math.round(dmg * (crit ? 1.7 : 1) * rand(0.92, 1.08));
+  const big = o.heavy || crit;
+  floater(t.x + rand(-14, 14), t.y, 64 + rand(26), (crit ? T('crit') + ' ' : '') + dmg, crit ? '#ffe14d' : '#fff', crit ? 25 : 15 + Math.min(8, dmg / 8), 0.75);
+  burst(t.x, t.y, 30 + (t.z || 0), big ? 12 : 6, ['#fff', '#ffe08a', '#ffb347'], { sp: 300, up: 220, life: 0.35, size: 5 });
+  if (big) ring(t.x, t.y, 44, '#fff', 0.22);
+  G.hitstop = Math.max(G.hitstop, big ? 0.085 : 0.045);
+  View.shake = Math.max(View.shake, o.heavy ? 9 : crit ? 7 : 4);
+  G.combo++; G.comboT = 2.6;
+  if (big) Sfx.play('hit2');
+  if (isBoss) { damageBoss(t, dmg); return true; }
+  if (o.kb) { t.kx += Math.cos(o.a) * o.kb; t.ky += Math.sin(o.a) * o.kb; }
+  if (o.stun) { t.stun = Math.max(t.stun, o.stun); if (o.air) t.air = t.stun; t.wind = 0; t.dashWind = 0; }
+  damageEnemy(t, dmg);
+  return true;
+}
+
+function startSwing(p) {
+  const w = WEAPONS[p.weapon], tg = p.atkTarget || pickTarget(p, w.reach + 150, !Input.touch);
+  if (tg) {
+    const d = dist(p.x, p.y, tg.x, tg.y), a = angTo(p.x, p.y, tg.x, tg.y);
+    if (Input.touch || p.atkTarget || Math.abs(angDiff(p.aim, a)) < 1.3) {
+      p.aim = a;
+      // close the gap so the blow lands
+      const gap = Math.min(d - w.reach * 0.6 - tg.r, 115);
+      if (gap > 8) { p.lungeT = 0.09; p.lvx = (Math.cos(a) * gap) / 0.09; p.lvy = (Math.sin(a) * gap) / 0.09; }
+    }
+  }
+  p.chain = p.chainT > 0 ? (p.chain % 3) + 1 : 1;
+  p.chainT = w.swing + 0.75;
+  p.swingT = p.swingMax = w.swing * (p.chain === 3 ? 1.25 : 1);
+  p.swingA = p.aim; p.swingHit = false; p.fireT = 1.2;
+  Sfx.play('slash');
+}
+function resolveSwing(p) {
+  const w = WEAPONS[p.weapon], fin = p.chain === 3, a = p.swingA;
+  const reach = w.reach * (fin ? 1.18 : 1), half = w.arc * (fin ? 1.2 : 1);
+  G.slashes.push({ x: p.x, y: p.y, a, reach, half, t: 0, life: fin ? 0.24 : 0.17, col: TIER[w.tier], fin, dir: p.chain === 2 ? -1 : 1 });
+  forTargets((t) => {
+    if (inArc(p.x, p.y, a, reach, half, t)) hitTarget(t, w.dmg * (fin ? 1.5 : 1), { a: angTo(p.x, p.y, t.x, t.y), kb: w.kb * (fin ? 1.7 : 1), heavy: fin, stun: fin ? w.stun3 || 0 : 0 });
+  });
+}
+// W: slam the floor, launching everything around you.
+function slam(p) {
+  const R = 140;
+  ring(p.x, p.y, R, '#ffe08a', 0.4);
+  G.slashes.push({ x: p.x, y: p.y, a: 0, reach: R, half: Math.PI, t: 0, life: 0.28, col: '#ffe08a', fin: true, dir: 1 });
+  burst(p.x, p.y, 4, 26, ['#fff', '#ffe08a', '#d9c98f'], { sp: 380, up: 320, life: 0.6, size: 7 });
+  View.shake = Math.max(View.shake, 11);
+  Sfx.play('boom');
+  forTargets((t) => {
+    if (dist(p.x, p.y, t.x, t.y) < R + t.r) hitTarget(t, 30 * power(p), { a: angTo(p.x, p.y, t.x, t.y), kb: 110, stun: 0.9, air: true, heavy: true });
+  });
+}
+// R: Labor Arbitration. A very large book arrives from above.
+function updateUlts(dt) {
+  const p = G.player;
+  for (const u of G.ults) {
+    u.t += dt;
+    if (u.done || u.t < u.delay) continue;
+    u.done = true;
+    ring(u.x, u.y, u.r, '#ffcf4a', 0.5); ring(u.x, u.y, u.r * 0.6, '#fff', 0.35);
+    burst(u.x, u.y, 4, 46, ['#fff', '#ffcf4a', '#c0392b', '#f0e2b0'], { sp: 520, up: 420, life: 0.9, size: 8 });
+    View.shake = 18; G.hitstop = Math.max(G.hitstop, 0.14);
+    G.flash = { color: '255,225,120', t: 0.3, max: 0.3, a: 0.35 };
+    Sfx.play('ult');
+    forTargets((t) => {
+      if (dist(u.x, u.y, t.x, t.y) < u.r + t.r) hitTarget(t, 90 * power(p), { a: angTo(u.x, u.y, t.x, t.y), kb: 200, stun: 1.5, air: true, heavy: true, nocrit: true });
+    });
+  }
+  G.ults = G.ults.filter((u) => u.t < u.delay + 0.45);
+  for (const s of G.slashes) s.t += dt;
+  G.slashes = G.slashes.filter((s) => s.t < s.life);
 }
 
 function updatePlayer(dt) {
-  const p = G.player, z = G.zone;
+  const p = G.player, z = G.zone, w = WEAPONS[p.weapon];
   p.t += dt;
   p.inv = Math.max(0, p.inv - dt);
   p.hurtT = Math.max(0, p.hurtT - dt);
-  p.fireCd -= dt; p.dashCd -= dt; p.fireT -= dt; p.teaCd -= dt;
-  const mv = Input.moveVec();
-  let fire = false;
-  if (Input.touch) {
-    const rs = Input.rstick;
-    if (rs && Math.hypot(rs.x - rs.ox, rs.y - rs.oy) > 12) {
-      p.aim = Math.atan2((rs.y - rs.oy) / YK, rs.x - rs.ox);
-      p.aimD = 260; fire = true;
-    } else {
-      const tg = nearestTarget(p.x, p.y, 500);
-      if (tg && hasSight(p.x, p.y, tg.x, tg.y)) { p.aim = angTo(p.x, p.y, tg.x, tg.y); p.aimD = dist(p.x, p.y, tg.x, tg.y); fire = true; }
-      else if (mv.x || mv.y) p.aim = Math.atan2(mv.y, mv.x);
-    }
-  } else {
-    const w = screenToWorld(Input.mouse.x, Input.mouse.y, 26);
-    p.aim = angTo(p.x, p.y, w.x, w.y);
-    p.aimD = dist(p.x, p.y, w.x, w.y);
-    fire = Input.mouse.down || Input.keys.KeyJ;
-  }
-  p.face = Math.cos(p.aim) >= 0 ? 1 : -1;
+  p.fireT -= dt; p.teaCd -= dt; p.chainT -= dt;
+  for (const k in p.cd) p.cd[k] = Math.max(0, p.cd[k] - dt);
+  if ((G.comboT -= dt) <= 0) G.combo = 0;
+  const free = p.castT <= 0 && p.dashT <= 0;
+  const stick = Input.moveVec();
+  let mx = stick.x, my = stick.y, wantSwing = !!Input.keys.btn_atk;
+  let ground = null, body = null;
 
-  const wantDash = Input.take('Space') | Input.take('ShiftLeft') | Input.take('ShiftRight') | Input.take('dashBtn');
-  if (wantDash && p.dashCd <= 0) {
-    const m = Math.hypot(mv.x, mv.y);
-    p.dashDir = m > 0.1 ? { x: mv.x / m, y: mv.y / m } : { x: Math.cos(p.aim), y: Math.sin(p.aim) };
-    p.dashT = 0.2; p.dashCd = 1.1;
+  if (!Input.touch) {
+    // PC plays like a MOBA: right-click to move or to pick a target, left-click to swing at the cursor
+    ground = screenToWorld(Input.mouse.x, Input.mouse.y, 0);
+    body = screenToWorld(Input.mouse.x, Input.mouse.y, 26);
+    const rc = Input.take('rclick'), lc = Input.take('lclick') | Input.take('KeyA');
+    if (rc || lc) {
+      let tg = null, bd = lc ? 150 : 48;
+      forTargets((t) => { const d = dist(body.x, body.y, t.x, t.y) - t.r; if (d < bd) { bd = d; tg = t; } });
+      if (tg) { p.atkTarget = tg; p.moveTo = null; }
+      else if (rc) { p.atkTarget = null; p.moveTo = { x: ground.x, y: ground.y }; ring(ground.x, ground.y, 26, '#7df0a0', 0.3); }
+      else { p.atkTarget = null; p.moveTo = null; }
+    } else if (Input.mouse.rdown && !p.atkTarget) p.moveTo = { x: ground.x, y: ground.y };
+    if (Input.take('KeyS')) { p.moveTo = null; p.atkTarget = null; }
+    if (mx || my) { p.moveTo = null; p.atkTarget = null; }
+    if (Input.mouse.down && !p.atkTarget) { wantSwing = true; if (p.swingT <= 0 && free) p.aim = angTo(p.x, p.y, body.x, body.y); p.moveTo = null; }
+  }
+  // chase the chosen target and keep hitting it
+  const at = p.atkTarget;
+  if (at) {
+    if (at.dead || at.down || at.gone || at.hp <= 0) p.atkTarget = null;
+    else {
+      const d = dist(p.x, p.y, at.x, at.y), a = angTo(p.x, p.y, at.x, at.y);
+      if (d <= w.reach * 0.85 + at.r) { wantSwing = true; if (p.swingT <= 0 && free) p.aim = a; }
+      else { mx = Math.cos(a); my = Math.sin(a); }
+    }
+  } else if (p.moveTo) {
+    const d = dist(p.x, p.y, p.moveTo.x, p.moveTo.y);
+    if (d < 10) p.moveTo = null;
+    else { mx = (p.moveTo.x - p.x) / d; my = (p.moveTo.y - p.y) / d; }
+  }
+  const moving = Math.hypot(mx, my) > 0.1;
+  if (moving && free && p.swingT <= 0 && !wantSwing) p.aim = Math.atan2(my, mx);
+
+  // where a skill goes: the cursor on PC; a dragged direction or the nearest target on touch
+  const aimSkill = (range) => {
+    if (!Input.touch) { p.aim = angTo(p.x, p.y, body.x, body.y); return { tg: null, d: dist(p.x, p.y, ground.x, ground.y) }; }
+    const ca = Input.castAim;
+    Input.castAim = null;
+    if (ca) { p.aim = ca.a; return { tg: null, d: ca.d * range }; }
+    const tg = pickTarget(p, range, false);
+    if (tg) p.aim = angTo(p.x, p.y, tg.x, tg.y);
+    return { tg, d: range * 0.6 };
+  };
+  const press = (key, btn) => Input.take(key) | Input.take('btn_' + btn);
+  const begin = (k) => { p.cd[k] = SKILL_CD[k]; p.swingT = 0; p.lungeT = 0; p.fireT = 1.2; p.moveTo = null; };
+
+  if ((press('KeyD', 'd') | Input.take('Space')) && free && p.cd.d <= 0) {
+    const m = Math.hypot(mx, my);
+    if (!Input.touch && m < 0.1) p.aim = angTo(p.x, p.y, body.x, body.y);
+    p.dashDir = m > 0.1 ? { x: mx / m, y: my / m } : { x: Math.cos(p.aim), y: Math.sin(p.aim) };
+    p.dashT = 0.2; p.dashKind = 'd'; p.cd.d = SKILL_CD.d; p.swingT = 0;
     Sfx.play('dash');
   }
+  if (press('KeyQ', 'q') && free && p.cd.q <= 0) {
+    aimSkill(460); begin('q');
+    p.castT = 0.12; p.castKind = 'q';
+    G.bullets.push({ id: 'pan', x: p.x + Math.cos(p.aim) * 20, y: p.y + Math.sin(p.aim) * 20, z: 26, vx: Math.cos(p.aim) * 800, vy: Math.sin(p.aim) * 800, r: 13, dmg: 22 * power(p), life: 0.58, t: 0 });
+    Sfx.play('slash');
+  }
+  if (press('KeyW', 'w') && free && p.cd.w <= 0) {
+    Input.castAim = null; begin('w');
+    p.castT = 0.2; p.castKind = 'w';
+    Sfx.play('lob');
+  }
+  if (press('KeyE', 'e') && free && p.cd.e <= 0) {
+    aimSkill(330); begin('e');
+    p.dashDir = { x: Math.cos(p.aim), y: Math.sin(p.aim) };
+    p.dashT = 0.18; p.dashKind = 'e'; p.dashHit = new Set();
+    G.slashes.push({ x: p.x, y: p.y, a: p.aim, reach: 270, half: 0.16, t: 0, life: 0.28, col: '#8fe8ff', fin: true, dir: 1, line: true });
+    Sfx.play('dash'); Sfx.play('slash');
+  }
+  if (press('KeyR', 'r') && free && p.cd.r <= 0) {
+    const s = aimSkill(360), d = clamp(s.d, 60, 340);
+    begin('r');
+    G.ults.push({ x: s.tg ? s.tg.x : p.x + Math.cos(p.aim) * d, y: s.tg ? s.tg.y : p.y + Math.sin(p.aim) * d, t: 0, delay: 0.6, r: 170 });
+    p.castT = 0.25; p.castKind = 'r';
+    Sfx.play('warn');
+  }
+  if (Input.take('KeyF') | Input.take('btn_tea')) useTea();
+
+  if (p.castT > 0 && (p.castT -= dt) <= 0 && p.castKind === 'w') slam(p);
+  if (p.swingT > 0) {
+    p.swingT -= dt;
+    if (!p.swingHit && p.swingT <= p.swingMax * 0.55) { p.swingHit = true; resolveSwing(p); }
+  } else if (wantSwing && p.castT <= 0 && p.dashT <= 0) startSwing(p);
+
   let vx, vy;
   if (p.dashT > 0) {
     p.dashT -= dt;
-    vx = p.dashDir.x * 820; vy = p.dashDir.y * 820;
-    part(p.x, p.y, rand(8, 40), { vx: -vx * 0.1, vy: -vy * 0.1, life: 0.25, color: '#fff', size: 7, grav: 0, round: true });
-  } else { vx = mv.x * p.speed; vy = mv.y * p.speed; }
+    const sp = p.dashKind === 'e' ? 1500 : 820;
+    vx = p.dashDir.x * sp; vy = p.dashDir.y * sp;
+    part(p.x, p.y, rand(8, 40), { vx: -vx * 0.06, vy: -vy * 0.06, life: 0.25, color: p.dashKind === 'e' ? '#8fe8ff' : '#fff', size: 8, grav: 0, round: true });
+    if (p.dashKind === 'e') {
+      forTargets((t) => {
+        if (p.dashHit.has(t) || dist(p.x, p.y, t.x, t.y) > t.r + 40) return;
+        p.dashHit.add(t);
+        hitTarget(t, 24 * power(p), { a: Math.atan2(vy, vx) + pick([-0.9, 0.9]), kb: 280, heavy: true });
+      });
+    }
+  } else if (p.lungeT > 0) { p.lungeT -= dt; vx = p.lvx; vy = p.lvy; }
+  else {
+    const f = p.castT > 0 ? 0 : p.swingT > 0 ? 0.45 : 1, m = Math.max(1, Math.hypot(mx, my));
+    vx = (mx / m) * p.speed * f; vy = (my / m) * p.speed * f;
+  }
   p.vx = vx; p.vy = vy;
   p.x += vx * dt; p.y += vy * dt;
-  p.moving = Math.hypot(mv.x, mv.y) > 0.1;
+  p.moving = moving && p.castT <= 0;
   pushOut(p);
+  p.face = Math.cos(p.swingT > 0 ? p.swingA : p.aim) >= 0 ? 1 : -1;
   p.hidden = p.fireT <= 0 && p.dashT <= 0 && inTallGrass(p.x, p.y);
-
-  for (let i = 0; i < 5; i++) if (Input.take('Digit' + (i + 1)) && p.weapons[i]) { p.wi = i; Sfx.play('ui'); }
-  if (Input.take('KeyQ')) switchWeapon(p, -1);
-  if (Input.take('KeyE') || Input.take('swapBtn')) switchWeapon(p, 1);
-  if (Input.wheel) { switchWeapon(p, Input.wheel > 0 ? 1 : -1); Input.wheel = 0; }
-  if (Input.take('KeyF') || Input.take('KeyR') || Input.take('teaBtn')) useTea();
-  if (fire && p.fireCd <= 0) fireWeapon(p);
 
   // the optimization circle bites every half second
   p.outside = dist(p.x, p.y, z.x, z.y) > z.r;
@@ -429,42 +609,6 @@ function updatePlayer(dt) {
     G.flash = { color: '190,80,255', t: 0.3, max: 0.3, a: 0.22 };
     if (p.hp <= 0) { p.hp = 0; playerDie(); }
   }
-}
-
-function fireWeapon(p) {
-  const w = p.weapons[p.wi], d = WEAPONS[w.id];
-  p.fireCd = d.cd; p.fireT = 1.2;
-  const ox = p.x + Math.cos(p.aim) * 20, oy = p.y + Math.sin(p.aim) * 20;
-  const mk = (ang, o, sm = 1) => G.bullets.push(Object.assign({
-    id: w.id, x: ox, y: oy, z: 26, vx: Math.cos(ang) * d.speed * sm, vy: Math.sin(ang) * d.speed * sm,
-    r: 6, dmg: d.dmg, life: 1.1, t: 0, pierce: 0, hit: null,
-  }, o));
-  if (w.id === 'stapler') { mk(p.aim + rand(-0.03, 0.03)); Sfx.play('shoot'); }
-  else if (w.id === 'keyboard') {
-    for (let i = 0; i < d.pellets; i++) mk(p.aim + rand(-d.spread / 2, d.spread / 2), { life: rand(0.34, 0.52), r: 5, spin: rand(TAU) }, rand(0.8, 1.1));
-    Sfx.play('keys');
-  } else if (w.id === 'coffee') {
-    mk(p.aim, { lob: true, T: clamp(p.aimD || 260, 110, 440) / d.speed, r: 8, life: 9 });
-    Sfx.play('lob');
-  } else if (w.id === 'plane') { mk(p.aim, { pierce: d.pierce, hit: new Set(), r: 8 }); Sfx.play('plane'); }
-  else if (w.id === 'book') { mk(p.aim, { boom: true, hit: new Set(), r: 13, life: 9, pierce: 999 }); Sfx.play('book'); }
-  if (w.ammo !== Infinity && --w.ammo <= 0) {
-    p.weapons.splice(p.wi, 1);
-    p.wi = 0;
-    floater(p.x, p.y, 80, T('out_of_ammo'), '#e8e4f0', 14);
-  }
-}
-
-// ---------- player projectiles ----------
-function coffeeSplash(b) {
-  const aoe = WEAPONS.coffee.aoe;
-  ring(b.x, b.y, aoe, '#8d6e63');
-  burst(b.x, b.y, 4, 18, ['#6d4c41', '#8d6e63', '#d7ccc8'], { sp: 220, up: 200 });
-  View.shake = Math.max(View.shake, 4);
-  Sfx.play('boom');
-  for (const e of G.enemies) if (e.spawnT <= 0 && !e.dead && dist(b.x, b.y, e.x, e.y) < aoe + e.r) damageEnemy(e, b.dmg, b);
-  const bs = G.boss;
-  if (bs && dist(b.x, b.y, bs.x, bs.y) < aoe + bs.r) damageBoss(bs, b.dmg);
 }
 
 function damageEnemy(e, d, b) {
@@ -484,65 +628,24 @@ function killEnemy(e, byPlayer) {
   else if (rand() < 0.2) dropItem(e.x, e.y, rollVal(0, 1));
 }
 
+// The only projectiles left: your thrown pan (Q) and the sidekicks' claws and tokens.
 function updateBullets(dt) {
-  const p = G.player, boss = G.boss;
+  const boss = G.boss;
   for (const b of G.bullets) {
     b.t += dt;
-    if (b.lob) {
-      const u = b.t / b.T;
-      b.x += b.vx * dt; b.y += b.vy * dt;
-      b.z = 26 * (1 - u) + 340 * u * (1 - u);
-      if (u >= 1) { coffeeSplash(b); b.dead = true; }
-      continue;
-    }
-    if (b.boom) {
-      if (!b.ret) {
-        const k = Math.max(0, 1 - b.t / 0.5);
-        b.x += b.vx * k * dt; b.y += b.vy * k * dt;
-        if (b.t > 0.5) { b.ret = true; b.hit.clear(); }
-      } else {
-        const a = angTo(b.x, b.y, p.x, p.y);
-        b.vx = Math.cos(a) * 720; b.vy = Math.sin(a) * 720;
-        b.x += b.vx * dt; b.y += b.vy * dt;
-        if (dist(b.x, b.y, p.x, p.y) < 26) b.dead = true;
-      }
-    } else {
-      b.x += b.vx * dt; b.y += b.vy * dt;
-      if (b.t > b.life || b.x < 0 || b.x > ARENA.w || b.y < 0 || b.y > ARENA.h) { b.dead = true; continue; }
-      if (inObstacle(b.x, b.y)) {
-        b.dead = true;
-        burst(b.x, b.y, 26, 3, ['#fff'], { sp: 80, up: 80, life: 0.3 });
-        continue;
-      }
-    }
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    if (b.t > b.life || inObstacle(b.x, b.y)) { b.dead = true; continue; }
     for (const e of G.enemies) {
       if (e.spawnT > 0 || e.dead || Math.abs(b.x - e.x) > 40 || dist(b.x, b.y, e.x, e.y) > e.r + b.r + 2) continue;
-      if (b.hit) { if (b.hit.has(e)) continue; b.hit.add(e); }
-      damageEnemy(e, b.dmg, b);
-      if (b.pierce > 0) b.pierce--; else { b.dead = true; break; }
+      if (b.id === 'pan') hitTarget(e, b.dmg, { a: Math.atan2(b.vy, b.vx), kb: 220, stun: 0.7, heavy: true });
+      else damageEnemy(e, b.dmg, b);
+      b.dead = true;
+      break;
     }
-    if (b.dead || !boss || boss.gone || boss.down) continue;
-    if (boss.orbs) {
-      let blocked = false;
-      for (let i = 0; i < boss.orbs; i++) {
-        const a = boss.orbA + (i / boss.orbs) * TAU;
-        if (dist(b.x, b.y, boss.x + Math.cos(a) * 62, boss.y + Math.sin(a) * 62) < 17 + b.r) { blocked = true; break; }
-      }
-      if (blocked) {
-        burst(b.x, b.y, 26, 4, ['#ffcc80', '#fff'], { sp: 90, up: 90, life: 0.3 });
-        if (b.boom) { if (!b.ret) { b.ret = true; b.hit.clear(); } } else b.dead = true;
-        continue;
-      }
-    }
-    if (dist(b.x, b.y, boss.x, boss.y) < boss.r + b.r) {
-      if (boss.reflect > 0 && !b.boom) {
-        b.dead = true;
-        eb(b.x, b.y, angTo(b.x, b.y, p.x, p.y) + rand(-0.25, 0.25), 330, { dmg: 8, color: '#ffd180', r: 6 });
-        continue;
-      }
-      if (b.hit) { if (b.hit.has(boss)) continue; b.hit.add(boss); }
-      damageBoss(boss, b.dmg);
-      if (b.pierce > 0) b.pierce--; else b.dead = true;
+    if (!b.dead && boss && !boss.gone && !boss.down && dist(b.x, b.y, boss.x, boss.y) < boss.r + b.r) {
+      if (b.id === 'pan') hitTarget(boss, b.dmg, { a: 0, heavy: true });
+      else if (boss.reflect <= 0) damageBoss(boss, b.dmg);
+      b.dead = true;
     }
   }
   G.bullets = G.bullets.filter((b) => !b.dead);
@@ -553,7 +656,7 @@ function spawnEnemy(type, x, y) {
   const d = ENEMY[type];
   const e = {
     type, def: d, x, y, z: 0, r: d.r, hp: d.hp, maxhp: d.hp, t: rand(10), spawnT: 0.6, aggro: 430,
-    atkCd: rand(0.3, 0.8), shootCd: rand(1.2, 2.6), face: 1, flash: 0, kx: 0, ky: 0, strafe: pick([-1, 1]),
+    atkCd: rand(0.3, 0.8), shootCd: rand(1.2, 2.6), face: 1, flash: 0, kx: 0, ky: 0, strafe: pick([-1, 1]), stun: 0, air: 0,
   };
   G.enemies.push(e);
   return e;
@@ -565,6 +668,16 @@ function updateEnemies(dt) {
     e.t += dt; e.flash -= dt;
     if (e.type === 'rival') { updateRival(e, dt); continue; }
     if (e.spawnT > 0) { e.spawnT -= dt; continue; }
+    if (e.stun > 0) {
+      e.stun -= dt;
+      e.z = e.air > 0 ? Math.sin(Math.PI * clamp(1 - e.stun / e.air, 0, 1)) * 44 : e.z;
+      if (e.stun <= 0) { e.air = 0; e.z = 0; }
+      e.x += e.kx * dt; e.y += e.ky * dt;
+      const dm = Math.pow(0.002, dt);
+      e.kx *= dm; e.ky *= dm;
+      pushOut(e, true);
+      continue;
+    }
     const d = dist(e.x, e.y, p.x, p.y);
     if (e.asleep) { if (d < (p.hidden ? 170 : e.aggro)) e.asleep = false; else continue; }
     if (d > 1100) { e.asleep = true; continue; }
@@ -620,9 +733,9 @@ function updateEnemies(dt) {
 
 // ---------- rivals: the other 29 people after the one remaining headcount ----------
 const RIVAL_KITS = [
-  { hp: 55, armor: 0, sight: 400, spread: 0.2, tea: 0, speed: 185, ws: ['stapler', 'stapler', 'keyboard'], loot: [100, 700] },
-  { hp: 70, armor: 25, sight: 440, spread: 0.15, tea: 1, speed: 195, ws: ['keyboard', 'plane', 'stapler'], loot: [500, 3000] },
-  { hp: 85, armor: 60, sight: 480, spread: 0.11, tea: 2, speed: 205, ws: ['plane', 'book', 'keyboard'], loot: [2500, 9000] },
+  { hp: 85, armor: 0, sight: 400, spread: 0.2, tea: 0, speed: 185, ws: ['stapler', 'stapler', 'fan'], loot: [100, 700] },
+  { hp: 115, armor: 25, sight: 440, spread: 0.15, tea: 1, speed: 195, ws: ['fan', 'keyboard', 'fan'], loot: [500, 3000] },
+  { hp: 150, armor: 60, sight: 480, spread: 0.11, tea: 2, speed: 205, ws: ['keyboard', 'board', 'book'], loot: [2500, 9000] },
 ];
 const RIVAL_TITLES = [
   [['Intern', '实习生'], ['New grad', '校招生'], ['Contractor', '外包']],
@@ -639,7 +752,8 @@ function spawnRival(x, y) {
   const e = {
     type: 'rival', def: ENEMY.rival, x, y, z: 0, r: 14, hp: kit.hp, maxhp: kit.hp, armor: kit.armor, lvl,
     w: pick(kit.ws), sight: kit.sight, spread: kit.spread, tea: kit.tea, speed: kit.speed, loot: Math.round(rand(kit.loot[0], kit.loot[1])),
-    t: rand(10), spawnT: 0, think: rand(0.5), fireCd: rand(1), healCd: 0, fleeT: 0, fleeCd: 0, strafe: pick([-1, 1]), pref: rand(200, 300), face: 1, aim: 0, flash: 0,
+    t: rand(10), spawnT: 0, think: rand(0.5), fireCd: rand(1), healCd: 0, fleeT: 0, fleeCd: 0, kx: 0, ky: 0, stun: 0, air: 0,
+    wind: 0, windMax: 1, windA: 0, atkCd: rand(0.5), dashWind: 0, dashT: 0, dashA: 0, dashHit: false, skillCd: rand(3, 8), ranged: rand() < 0.2, strafe: pick([-1, 1]), pref: rand(200, 300), face: 1, aim: 0, flash: 0,
     state: 'loot', gx: x, gy: y, goalC: null, target: null, alertT: 0, stT: 0, sx0: x, sy0: y, detour: null, exT: 0, greed: rand(2500, 9000),
     vx: 0, vy: 0, moving: false, outside: false,
     title: pick(RIVAL_TITLES[lvl]), nm: pick(RIVAL_NAMES),
@@ -686,23 +800,23 @@ function killRival(e, src, cause) {
   }
 }
 
+// A few rivals keep their distance and throw staples instead.
 function rivalFire(e, a, tg) {
-  const s = e.spread, onscr = onScreen(e.x, e.y, 100);
-  const o = { owner: e, life: 1.2, ghost: false };
-  if (e.w === 'stapler') {
-    e.fireCd = rand(0.42, 0.6);
-    eb(e.x, e.y, a + rand(-s, s), 520, Object.assign({ shape: 'staple', dmg: 7, r: 6 }, o));
-  } else if (e.w === 'keyboard') {
-    e.fireCd = rand(0.85, 1.1);
-    for (let i = 0; i < 4; i++) eb(e.x, e.y, a + rand(-0.22, 0.22), 470 * rand(0.85, 1.1), Object.assign({ shape: 'key', dmg: 5, r: 5 }, o, { life: 0.6 }));
-  } else if (e.w === 'plane') {
-    e.fireCd = rand(0.5, 0.65);
-    eb(e.x, e.y, a + rand(-s, s), 660, Object.assign({ shape: 'plane', dmg: 11, r: 7 }, o));
-  } else {
-    e.fireCd = rand(1.1, 1.4);
-    eb(e.x, e.y, a + rand(-s, s), 430, Object.assign({ shape: 'book', dmg: 16, r: 11 }, o));
+  e.fireCd = rand(1.0, 1.5);
+  eb(e.x, e.y, a + rand(-e.spread, e.spread), 430, { shape: 'staple', dmg: 7, r: 6, owner: e, life: 1.2 });
+  if (tg === G.player && onScreen(e.x, e.y, 100)) Sfx.play('shoot');
+}
+// The wound-up swing lands: whoever is still inside the red wedge gets hit.
+function rivalSwing(e) {
+  const w = WEAPONS[e.w], a = e.windA, reach = w.reach + 6, p = G.player, dmg = Math.round(w.dmg * 0.9);
+  G.slashes.push({ x: e.x, y: e.y, a, reach, half: w.arc, t: 0, life: 0.18, col: '#ff8a8a', dir: 1 });
+  if (p.hp > 0 && inArc(e.x, e.y, a, reach, w.arc, p)) hurtPlayer(dmg, false, rivalName(e));
+  for (const o of G.enemies) {
+    if (o === e || o.type !== 'rival' || o.dead || !inArc(e.x, e.y, a, reach, w.arc, o)) continue;
+    damageRival(o, dmg * 0.6, e);
+    o.kx += Math.cos(a) * 130; o.ky += Math.sin(a) * 130;
   }
-  if (onscr) Sfx.play(tg === G.player ? 'shoot' : 'hit');
+  if (onScreen(e.x, e.y, 100)) Sfx.play('slash');
 }
 
 function rivalThink(e) {
@@ -767,20 +881,53 @@ function rivalThink(e) {
 
 function updateRival(e, dt) {
   const z = G.zone, p = G.player;
-  e.fireCd -= dt; e.healCd -= dt; e.alertT -= dt; e.fleeT -= dt; e.fleeCd -= dt;
+  e.fireCd -= dt; e.healCd -= dt; e.alertT -= dt; e.fleeT -= dt; e.fleeCd -= dt; e.atkCd -= dt; e.skillCd -= dt;
+  const damp = Math.pow(0.002, dt);
+  e.x += e.kx * dt; e.y += e.ky * dt; e.kx *= damp; e.ky *= damp;
+  if (dist(e.x, e.y, z.x, z.y) > z.r) {
+    e.hp -= zoneDmg() * dt;
+    if (e.hp <= 0) return killRival(e, null, 'zone');
+  }
+  if (e.stun > 0) {
+    // launched or dazed: no thinking, no swinging
+    e.stun -= dt;
+    e.z = e.air > 0 ? Math.sin(Math.PI * clamp(1 - e.stun / e.air, 0, 1)) * 44 : 0;
+    if (e.stun <= 0) { e.air = 0; e.z = 0; }
+    e.moving = false;
+    pushOut(e);
+    return;
+  }
   if ((e.think -= dt) <= 0) { e.think = rand(0.3, 0.5); rivalThink(e); }
   let mx = 0, my = 0;
   const tg = e.state === 'fight' && e.target && !e.target.dead && (e.target !== p || p.hp > 0) ? e.target : null;
+  if (e.dashT > 0) {
+    // dash strike in progress
+    e.dashT -= dt;
+    e.x += Math.cos(e.dashA) * 1100 * dt; e.y += Math.sin(e.dashA) * 1100 * dt;
+    if (!e.dashHit && p.hp > 0 && dist(e.x, e.y, p.x, p.y) < 34 && hurtPlayer(18, false, rivalName(e))) e.dashHit = true;
+    pushOut(e);
+    return;
+  }
+  if (e.dashWind > 0) { if ((e.dashWind -= dt) <= 0) { e.dashT = 0.22; e.dashHit = false; if (onScreen(e.x, e.y, 100)) Sfx.play('dash'); } e.moving = false; return; }
+  if (e.wind > 0) { e.aim = e.windA; e.moving = false; if ((e.wind -= dt) <= 0) { rivalSwing(e); e.atkCd = rand(0.4, 0.75); } return; }
   if (tg) {
     const d = dist(e.x, e.y, tg.x, tg.y), a = angTo(e.x, e.y, tg.x, tg.y);
     e.aim = a;
-    const radial = d > e.pref + 50 ? 1 : d < e.pref - 60 ? -1 : 0;
-    mx = Math.cos(a) * radial - Math.sin(a) * e.strafe * 0.8; my = Math.sin(a) * radial + Math.cos(a) * e.strafe * 0.8;
-    if (rand() < dt * 0.6) e.strafe *= -1;
-    if (e.fireCd <= 0 && d < e.sight + 60) {
-      const lead = d / 560;
-      rivalFire(e, angTo(e.x, e.y, tg.x + (tg.vx || 0) * lead * 0.5, tg.y + (tg.vy || 0) * lead * 0.5), tg);
+    if (e.ranged) {
+      const radial = d > e.pref + 50 ? 1 : d < e.pref - 60 ? -1 : 0;
+      mx = Math.cos(a) * radial - Math.sin(a) * e.strafe * 0.8; my = Math.sin(a) * radial + Math.cos(a) * e.strafe * 0.8;
+      if (e.fireCd <= 0 && d < e.sight + 60) rivalFire(e, angTo(e.x, e.y, tg.x + (tg.vx || 0) * 0.25, tg.y + (tg.vy || 0) * 0.25), tg);
+    } else {
+      const w = WEAPONS[e.w], close = w.reach + tg.r - 6;
+      if (d < close && e.atkCd <= 0) { e.wind = 0.27 + w.swing * 0.45; e.windMax = e.wind; e.windA = a; }
+      else if (e.lvl === 2 && e.skillCd <= 0 && d > 150 && d < 300) { e.dashWind = 0.5; e.dashA = a; e.skillCd = rand(6, 9); }
+      else {
+        // step in to strike, drift back out while recovering
+        const radial = d > close - 12 ? 1 : e.atkCd > 0.25 ? -0.6 : 0, side = d < close + 70 ? 0.7 : 0.15;
+        mx = Math.cos(a) * radial - Math.sin(a) * e.strafe * side; my = Math.sin(a) * radial + Math.cos(a) * e.strafe * side;
+      }
     }
+    if (rand() < dt * 0.6) e.strafe *= -1;
     if (e.outside) { const ca = angTo(e.x, e.y, z.nx, z.ny); mx = mx * 0.4 + Math.cos(ca); my = my * 0.4 + Math.sin(ca); }
   } else {
     const d = dist(e.x, e.y, e.gx, e.gy);
@@ -790,7 +937,7 @@ function updateRival(e, dt) {
       k.opened = true; e.goalC = null;
       e.loot += Math.round({ crate: rand(200, 800), locker: rand(600, 2600), safe: rand(3000, 12000) }[k.kind]);
       if (rand() < 0.3) e.armor = Math.min(100, e.armor + 30);
-      if (rand() < 0.25) e.w = pick(['keyboard', 'plane', 'book']);
+      if (rand() < 0.25) e.w = pick(['fan', 'keyboard', 'board']);
       if (rand() < 0.3) e.tea++;
     }
     if (e.state === 'extract' && d < 70 && (e.exT += dt) > 4) {
@@ -810,17 +957,13 @@ function updateRival(e, dt) {
     const sp = e.speed * (e.state === 'wander' ? 0.7 : 1);
     e.vx = (mx / m) * sp; e.vy = (my / m) * sp;
     e.x += e.vx * dt; e.y += e.vy * dt;
-    pushOut(e);
   } else { e.vx = 0; e.vy = 0; }
+  pushOut(e);
   e.face = Math.cos(e.aim) >= 0 ? 1 : -1;
   // wedged against a wall or a pond? sidestep for a moment
   if ((e.stT += dt) > 0.7) {
     if (e.moving && !tg && !e.detour && dist(e.x, e.y, e.sx0, e.sy0) < 26) e.detour = { a: e.aim + pick([-1, 1]) * rand(1.2, 1.9), t: rand(0.6, 1.2) };
     e.stT = 0; e.sx0 = e.x; e.sy0 = e.y;
-  }
-  if (dist(e.x, e.y, z.x, z.y) > z.r) {
-    e.hp -= zoneDmg() * dt;
-    if (e.hp <= 0) killRival(e, null, 'zone');
   }
 }
 
@@ -946,21 +1089,19 @@ function dropItem(x, y, item) {
   const a = rand(TAU), sp = rand(60, 150);
   G.pickups.push(Object.assign({ x, y, z: 14, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, vz: rand(170, 260), t: 0 }, item));
 }
-function rollWeapon() {
-  const owned = G.player.weapons.map((w) => w.id), fresh = WEAPON_IDS.filter((id) => !owned.includes(id));
-  return { kind: 'weapon', id: fresh.length && rand() < 0.7 ? pick(fresh) : pick(WEAPON_IDS) };
-}
+const WEAPON_ROLL = { crate: ['fan', 'fan', 'fan', 'keyboard', 'keyboard', 'board'], locker: ['fan', 'keyboard', 'keyboard', 'board', 'board', 'book'], safe: ['keyboard', 'board', 'board', 'book', 'book'] };
+const rollWeapon = (kind) => ({ kind: 'weapon', id: pick(WEAPON_ROLL[kind]) });
 function openContainer(k) {
   k.opened = true;
   Sfx.play('open');
   burst(k.x, k.y, 20, 10, ['#fff', '#ffe08a'], { sp: 120, up: 200 });
   const out = (it) => dropItem(k.x, k.y + 8, it);
   if (k.kind === 'crate') {
-    for (let i = randi(1, 2); i > 0; i--) { const q = rand(); out(q < 0.3 ? rollWeapon() : q < 0.5 ? { kind: 'tea' } : q < 0.62 ? { kind: 'armor', amt: 35 } : rollVal(0, q > 0.93 ? 2 : 1)); }
+    for (let i = randi(1, 2); i > 0; i--) { const q = rand(); out(q < 0.3 ? rollWeapon('crate') : q < 0.5 ? { kind: 'tea' } : q < 0.62 ? { kind: 'armor', amt: 35 } : rollVal(0, q > 0.93 ? 2 : 1)); }
   } else if (k.kind === 'locker') {
-    for (let i = randi(2, 3); i > 0; i--) { const q = rand(); out(q < 0.28 ? rollWeapon() : q < 0.42 ? { kind: 'tea' } : q < 0.58 ? { kind: 'armor', amt: 50 } : rollVal(1, q > 0.9 ? 3 : 2)); }
+    for (let i = randi(2, 3); i > 0; i--) { const q = rand(); out(q < 0.28 ? rollWeapon('locker') : q < 0.42 ? { kind: 'tea' } : q < 0.58 ? { kind: 'armor', amt: 50 } : rollVal(1, q > 0.9 ? 3 : 2)); }
   } else {
-    for (let i = randi(3, 4); i > 0; i--) { const q = rand(); out(q < 0.14 ? rollWeapon() : q < 0.24 ? { kind: 'tea' } : q < 0.38 ? { kind: 'armor', amt: 100 } : rollVal(2, q > 0.88 ? 4 : 3)); }
+    for (let i = randi(3, 4); i > 0; i--) { const q = rand(); out(q < 0.2 ? rollWeapon('safe') : q < 0.24 ? { kind: 'tea' } : q < 0.38 ? { kind: 'armor', amt: 100 } : rollVal(2, q > 0.88 ? 4 : 3)); }
   }
 }
 function updateContainers(dt) {
@@ -975,7 +1116,7 @@ function takePickup(k) {
   const p = G.player;
   if (k.kind === 'tea') { if (p.tea >= 6) return false; p.tea++; floater(p.x, p.y, 80, T('tea') + ' +1', '#ffd0d6', 15, 1.2); }
   else if (k.kind === 'armor') { if (p.armor >= 100) return false; p.armor = Math.min(100, p.armor + k.amt); floater(p.x, p.y, 80, T('armor') + ' +' + k.amt, '#9cc9ff', 15, 1.2); }
-  else if (k.kind === 'weapon') giveWeapon(k.id);
+  else if (k.kind === 'weapon') { if (!giveWeapon(k.id)) return false; }
   else {
     p.loot.value += k.value; p.loot.counts[k.tier]++;
     floater(p.x, p.y, 84, T(k.key) + '  +¥' + k.value.toLocaleString('en-US'), TIER[k.tier], k.tier >= 3 ? 19 : 15, 1.6);
@@ -996,7 +1137,7 @@ function updatePickups(dt) {
     if (Math.abs(k.x - p.x) > 90) continue;
     const d = dist(k.x, k.y, p.x, p.y);
     if (d > 80 || k.t < 0.4) continue;
-    if ((k.kind === 'tea' && p.tea >= 6) || (k.kind === 'armor' && p.armor >= 100)) continue;
+    if ((k.kind === 'tea' && p.tea >= 6) || (k.kind === 'armor' && p.armor >= 100) || (k.kind === 'weapon' && WEAPONS[k.id].tier <= WEAPONS[p.weapon].tier)) continue;
     if (d > 26) { const a = angTo(k.x, k.y, p.x, p.y); k.x += Math.cos(a) * 420 * dt; k.y += Math.sin(a) * 420 * dt; }
     else if (takePickup(k)) k.dead = true;
   }
