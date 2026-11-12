@@ -4,7 +4,7 @@
 // Everything standing on it is a billboard, depth-sorted by y.
 // The look is cel-shaded: flat colour, one shade band, a dark ink outline.
 const YK = 0.62; // vertical squash of the ground plane
-const View = { W: 0, H: 0, S: 1, cam: { x: 0, y: 0 }, ox: 0, oy: 0, shake: 0 };
+const View = { W: 0, H: 0, S: 1, S0: 1, cam: { x: 0, y: 0 }, ox: 0, oy: 0, shake: 0, kx: 0, ky: 0, zk: 0 }; // kx/ky: hit kick, zk: zoom punch
 const ARENA = { w: 4400, h: 4400 };
 const INK = '#33294a';               // solid ink: HUD text and speech bubbles
 const LINE = 'rgba(22,28,34,0.5)';   // soft edge for things in the world
@@ -144,8 +144,9 @@ function drawHair(c, p) {
 // Billboard chibi. Origin at the feet, facing +x (flip with p.face = -1).
 function drawPerson(c, p) {
   const t = p.t || 0, mv = p.moving && !p.kneel;
-  const bob = mv ? -Math.abs(Math.sin(t * 11)) * 2 : Math.sin(t * 2.5) * 0.7;
-  const sw = mv ? Math.sin(t * 11) * 5 : 0;
+  const pace = p.pace || 11;
+  const bob = mv ? -Math.abs(Math.sin(t * pace)) * 2.4 : Math.sin(t * 2.5) * 0.7;
+  const sw = mv ? Math.sin(t * pace) * 6 : 0;
   const sc = p.scale || 1;
   c.save();
   c.scale((p.face || 1) * sc, sc);

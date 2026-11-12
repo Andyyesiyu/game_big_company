@@ -124,7 +124,7 @@ function update(dt) {
   if (inExit) { if ((G.exT += dt) >= 5) return endMatch('extract'); }
   else G.exT = Math.max(0, G.exT - dt * 2);
   if (aliveRivals() === 0) return endMatch('winner');
-  updateCamera(dt, p.x + Math.cos(p.aim) * 50, p.y + Math.sin(p.aim) * 40);
+  updateCamera(dt, p.x + p.mvx * 0.2, p.y + p.mvy * 0.16);
 }
 
 function updateCamera(dt, tx, ty) {
@@ -231,12 +231,37 @@ function drawSlash(s) {
       c.strokeStyle = '#fff'; c.lineWidth = 15 * (1 - u); c.stroke();
       return;
     }
-    const sweep = Math.min(1, u * 2.4 + 0.4), a0 = s.a - s.half * s.dir, a1 = a0 + s.half * 2 * sweep * s.dir;
-    const r1 = s.reach, r0 = s.reach * (0.42 + u * 0.34);
+    const sweep = Math.min(1, u * 3.2 + 0.45), a0 = s.a - s.half * s.dir, a1 = a0 + s.half * 2 * sweep * s.dir;
+    const r1 = s.reach * (1 + u * 0.1), r0 = s.reach * (0.3 + u * 0.5);
     c.beginPath(); c.arc(s.x, s.y, r1, a0, a1, s.dir < 0); c.arc(s.x, s.y, r0, a1, a0, s.dir > 0); c.closePath();
+    c.globalCompositeOperation = 'lighter';
+    c.strokeStyle = s.col; c.lineWidth = s.fin ? 26 : 16; c.globalAlpha = (1 - u) * 0.3; c.stroke();
+    c.globalCompositeOperation = 'source-over';
+    c.globalAlpha = (1 - u) * (s.fin ? 0.95 : 0.85);
     c.fillStyle = '#fff'; c.fill();
     c.strokeStyle = s.col; c.lineWidth = s.fin ? 8 : 5; c.stroke();
+    // leading edge: a hard bright line where the weapon is right now
+    c.strokeStyle = '#fff'; c.lineWidth = s.fin ? 9 : 6; c.lineCap = 'round';
+    c.beginPath(); c.moveTo(s.x + Math.cos(a1) * r0, s.y + Math.sin(a1) * r0); c.lineTo(s.x + Math.cos(a1) * r1, s.y + Math.sin(a1) * r1); c.stroke();
   });
+}
+// Hit sparks: a flash star at the contact point and streaks thrown along the blow.
+function drawSpark(s) {
+  const u = s.t / s.life, S = View.S, x = sx(s.x), y = sy(s.y, s.z);
+  ctx.globalAlpha = 1 - u * u;
+  if (s.star) {
+    const r = s.len * S * (0.5 + u * 0.9);
+    ctx.save(); ctx.translate(x, y); ctx.rotate(s.rot);
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) { const q = i % 2 ? r * 0.16 : r; ctx.lineTo(Math.cos((i / 8) * TAU) * q, Math.sin((i / 8) * TAU) * q); }
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    return;
+  }
+  const dx = Math.cos(s.a), dy = Math.sin(s.a) * YK, r0 = s.len * S * u * 0.75, r1 = s.len * S * (0.25 + u * 0.9);
+  ctx.strokeStyle = s.col; ctx.lineWidth = s.w * S * (1 - u * 0.6); ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x + dx * r0, y + dy * r0); ctx.lineTo(x + dx * r1, y + dy * r1); ctx.stroke();
 }
 function drawUltMark(u) {
   const k = clamp(u.t / u.delay, 0, 1);
@@ -269,10 +294,11 @@ function drawPlayer(p) {
   let wa = p.aim, ws = 1.25;
   if (p.swingT > 0) { const k = 1 - p.swingT / p.swingMax; wa = p.swingA + lerp(-w.arc, w.arc, clamp(k * 1.6, 0, 1)) * (p.chain === 2 ? -1 : 1); ws = 1.5; }
   ctx.globalAlpha = p.inv > 0 && p.dashT <= 0 && Math.floor(p.t * 22) % 2 ? 0.4 : p.hidden ? 0.72 : 1;
-  lit(p.x, p.y, 0, 150, 130, (c) => drawPerson(c, Object.assign({}, PLAYER_LOOK, {
-    t: p.t, moving: p.moving, face: p.face, scared: p.hurtT > 0, armUp: p.castT > 0 || p.charge > 0.3, plaid: p.armor > 0 ? 'rgba(255,255,255,0.4)' : null,
+  const lean = p.swingT > 0 ? Math.sin(clamp(1 - p.swingT / p.swingMax, 0, 1) * Math.PI) * 0.2 : p.moving && p.dashT <= 0 ? 0.07 : 0;
+  lit(p.x, p.y, 0, 150, 130, (c) => { c.rotate(lean * p.face); drawPerson(c, Object.assign({}, PLAYER_LOOK, {
+    t: p.t, moving: p.moving, pace: 15, face: p.face, scared: p.hurtT > 0, armUp: p.castT > 0 || p.charge > 0.3, plaid: p.armor > 0 ? 'rgba(255,255,255,0.4)' : null,
     extra: heldWeapon(wa, p.face, p.weapon, ws),
-  })));
+  })); });
   ctx.globalAlpha = 1;
 }
 
@@ -280,6 +306,21 @@ const HR_LOOK = { top: '#f06292', shirt: '#fff', bottom: '#3b4a6b', skin: '#f6d3
 const MGR_LOOK = { top: '#7889a3', shirt: '#fff', tie: '#e5484d', bottom: '#3b4a6b', skin: '#eec3a2', hairStyle: 'bald', scale: 1.35 };
 const LVL_COL = ['#ffffff', '#9cc9ff', '#ffcf4a'];
 const WHITE = { top: '#fff', bottom: '#fff', skin: '#fff', hair: '#fff', shirt: null, tie: null, plaid: null, band: null, badge: null, glasses: null, logo: null };
+function enemyFigure(c, e) {
+  // hit flash: the whole figure goes white and squashes for a few frames
+  const fl = e.flash > 0 ? WHITE : null;
+  if (fl) c.scale(1.2, 0.86);
+  if (e.type === 'rival') drawPerson(c, Object.assign({}, e.look, fl, { t: e.t, moving: e.moving, face: e.face, scared: e.stun > 0, extra: heldWeapon(e.wind > 0 ? e.windA - 1.5 * e.face : e.aim, e.face, e.w, e.wind > 0 ? 1.45 : 1.2), pace: 13 }));
+  else if (e.type === 'penguin') drawPenguin(c, e.t, e.face, false);
+  else if (e.type === 'drone') drawDrone(c, e.t);
+  else if (e.type === 'agent') drawAgentBot(c, e.t, e.face);
+  else if (e.type === 'doubao') drawDoubao(c, e.t, e.face);
+  else if (e.type === 'crab') drawCrab(c, e.t, e.face);
+  else if (e.type === 'gpt') drawGptBot(c, e.t, e.face);
+  else if (e.type === 'hr') drawPerson(c, Object.assign({}, HR_LOOK, fl, { t: e.t, moving: !e.asleep, face: e.face, extra(cc, hx, hy) { cc.fillStyle = '#a1887f'; rrS(cc, hx - 2, hy - 9, 10, 13, 1.5); cc.fillStyle = '#fff'; cc.fillRect(hx - 0.5, hy - 7, 7, 9); } }));
+  else drawPerson(c, Object.assign({}, MGR_LOOK, fl, { t: e.t, moving: !e.asleep, face: e.face, extra(cc, hx, hy) { cc.fillStyle = '#fff'; rrS(cc, hx - 3, hy - 7, 8, 8, 1.5); cc.fillStyle = '#8a5a3c'; cc.fillRect(hx - 2, hy - 6, 6, 2); } }));
+  if (fl && e.type !== 'rival' && e.type !== 'hr' && e.type !== 'manager') { c.fillStyle = 'rgba(255,255,255,0.8)'; circ(c, 0, -15, 19); }
+}
 function drawEnemy(e) {
   const rise = e.spawnT > 0 ? e.spawnT / 0.6 : 0, S = View.S;
   if (e.wind > 0) {
@@ -298,21 +339,9 @@ function drawEnemy(e) {
   }
   shadow(e.x, e.y, e.r * (e.z > 10 ? 0.75 : 1) * (1 - rise * 0.5));
   ctx.globalAlpha = 1 - rise;
-  lit(e.x, e.y, e.z + rise * 50, 150, 150, (c) => {
-    // hit flash: paint the whole figure white for a few frames and pop it slightly
-    const fl = e.flash > 0 ? WHITE : null;
-    if (fl) c.scale(1.1, 1.1);
-    if (e.type === 'rival') drawPerson(c, Object.assign({}, e.look, fl, { t: e.t, moving: e.moving, face: e.face, scared: e.stun > 0, extra: heldWeapon(e.wind > 0 ? e.windA - 1.5 * e.face : e.aim, e.face, e.w, e.wind > 0 ? 1.45 : 1.2) }));
-    else if (e.type === 'penguin') drawPenguin(c, e.t, e.face, false);
-    else if (e.type === 'drone') drawDrone(c, e.t);
-    else if (e.type === 'agent') drawAgentBot(c, e.t, e.face);
-    else if (e.type === 'doubao') drawDoubao(c, e.t, e.face);
-    else if (e.type === 'crab') drawCrab(c, e.t, e.face);
-    else if (e.type === 'gpt') drawGptBot(c, e.t, e.face);
-    else if (e.type === 'hr') drawPerson(c, Object.assign({}, HR_LOOK, fl, { t: e.t, moving: !e.asleep, face: e.face, extra(cc, hx, hy) { cc.fillStyle = '#a1887f'; rrS(cc, hx - 2, hy - 9, 10, 13, 1.5); cc.fillStyle = '#fff'; cc.fillRect(hx - 0.5, hy - 7, 7, 9); } }));
-    else drawPerson(c, Object.assign({}, MGR_LOOK, fl, { t: e.t, moving: !e.asleep, face: e.face, extra(cc, hx, hy) { cc.fillStyle = '#fff'; rrS(cc, hx - 3, hy - 7, 8, 8, 1.5); cc.fillStyle = '#8a5a3c'; cc.fillRect(hx - 2, hy - 6, 6, 2); } }));
-    if (fl && e.type !== 'rival' && e.type !== 'hr' && e.type !== 'manager') { c.fillStyle = 'rgba(255,255,255,0.8)'; circ(c, 0, -15, 19); }
-  });
+  // struck: the figure judders in place for a few frames
+  const jit = e.hitAt !== undefined ? Math.max(0, 1 - (G.t - e.hitAt) / 0.2) : 0;
+  lit(e.x + Math.sin(G.t * 95) * 5 * jit, e.y, e.z + rise * 50, 150, 150, (c) => enemyFigure(c, e));
   ctx.globalAlpha = 1;
   if (e.type === 'rival') {
     const y = sy(e.y, 82);
@@ -369,6 +398,7 @@ function drawPickup(k) {
 }
 
 function render() {
+  View.S = View.S0 * (1 + View.zk);
   const S = View.S, p = G.player, t = G.t;
   // with the lighting pass on, the world goes to an offscreen canvas and through the shader
   const fx = Post.ok && Settings.fx;
@@ -378,7 +408,7 @@ function render() {
   ctx = fx ? sctx : hctx;
   ctx.setTransform(rd, 0, 0, rd, 0, 0);
   ctx.globalAlpha = 1;
-  View.ox = rand(-1, 1) * View.shake; View.oy = rand(-1, 1) * View.shake;
+  View.ox = rand(-1, 1) * View.shake - View.kx; View.oy = rand(-1, 1) * View.shake - View.ky; // the camera lunges with the blow
   setSun(G.day);
   drawTerrain(G.map, t);
   for (const e of G.exits) if (onScreen(e.x, e.y, 320)) drawExit(e, t);
@@ -424,6 +454,7 @@ function render() {
   for (const b of G.bosses) if (onScreen(b.x, b.y, 240)) list.push([b.y, () => drawBoss(b)]);
   if (G.state !== 'menu') list.push([p.y, () => drawPlayer(p)]);
   for (const q of G.pets) list.push([q.y, () => drawPet(q)]);
+  for (const q of G.corpses) list.push([q.y, () => { shadow(q.x, q.y, 12, 0.2, 0); lit(q.x, q.y, q.z, 170, 170, (c) => { c.translate(0, -28); c.rotate(q.rot); c.translate(0, 28); if (q.t < 0.1) q.e.flash = 1; else q.e.flash = 0; enemyFigure(c, q.e); }); }]);
   for (const u of G.ults) list.push([u.y + 1, () => drawUltBook(u)]);
   for (const b of G.bullets) list.push([b.y, () => drawBullet(b)]);
   for (const b of G.ebullets) if (onScreen(b.x, b.y, 60)) list.push([b.y, () => { shadow(b.x, b.y, b.r * 0.8, 0.18); at(b.x, b.y, b.z, (c) => drawEnemyBullet(c, b)); }]);
@@ -449,11 +480,12 @@ function render() {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
   for (const fl of G.floats) {
     ctx.globalAlpha = clamp((fl.life - fl.t) * 3, 0, 1);
-    ctx.font = `900 ${Math.round(fl.size * Math.max(S, 0.75))}px ${FONT}`;
+    ctx.font = `900 ${Math.round(fl.size * Math.max(S, 0.75) * (1 + Math.max(0, 0.12 - fl.t) * 7))}px ${FONT}`; // numbers land big, then settle
     ctx.lineWidth = 3.5; ctx.strokeStyle = INK;
     ctx.strokeText(fl.text, sx(fl.x), sy(fl.y, fl.z));
     ctx.fillStyle = fl.color; ctx.fillText(fl.text, sx(fl.x), sy(fl.y, fl.z));
   }
+  for (const s of G.sparks) drawSpark(s);
   ctx.globalAlpha = 1;
 
   if (G.zone) drawStorm(G.zone, t);
@@ -461,7 +493,7 @@ function render() {
   // wind
   ctx.strokeStyle = '#fff'; ctx.lineCap = 'round';
   for (const w of G.wind) {
-    const u = w.t / w.life, x0 = (w.x + u * 0.45) * View.W, y0 = w.y * View.H, len = w.len * View.W;
+    const u = w.t / w.life, x0 = (w.x + u * 0.12) * View.W - (View.cam.x - w.cx) * S, y0 = w.y * View.H - (View.cam.y - w.cy) * S * YK, len = w.len * View.W;
     ctx.globalAlpha = Math.sin(u * Math.PI) * 0.5; ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.moveTo(x0, y0);
     ctx.bezierCurveTo(x0 + len * 0.35, y0 - 16, x0 + len * 0.65, y0 + 16, x0 + len, y0 - 4);
@@ -470,7 +502,7 @@ function render() {
   // motes of light drifting in the air
   ctx.globalCompositeOperation = 'lighter';
   for (const q of G.motes) {
-    const u = (q.x + t * q.v + Math.sin(t * 0.7 + q.ph) * 0.01) % 1, y = (q.y + Math.sin(t * 0.4 + q.ph) * 0.03 + 1) % 1, a = 0.4 + Math.sin(t * 1.6 + q.ph) * 0.35;
+    const u = (((q.x + Math.sin(t * 0.7 + q.ph) * 0.012 - (View.cam.x * S) / View.W) % 1) + 1) % 1, y = (((q.y + Math.sin(t * 0.4 + q.ph) * 0.03 - (View.cam.y * S * YK) / View.H) % 1) + 1) % 1, a = 0.4 + Math.sin(t * 1.6 + q.ph) * 0.35;
     ctx.globalAlpha = a * 0.35; ctx.fillStyle = '#d8ff8a';
     ctx.beginPath(); ctx.arc(u * View.W, y * View.H, q.s * 2.8, 0, TAU); ctx.fill();
     ctx.globalAlpha = a; ctx.fillStyle = '#fbffd6';
@@ -790,7 +822,7 @@ function resize() {
   canvas.width = Math.round(View.W * DPR); canvas.height = Math.round(View.H * DPR);
   for (const c of [sceneCv, glCv]) { c.width = Math.round(View.W * SDPR); c.height = Math.round(View.H * SDPR); }
   const land = Math.min(View.W / 1150, View.H / 720);
-  View.S = clamp(View.H > View.W ? Math.max(land, View.W / 640) : land, 0.42, 1.5);
+  View.S = View.S0 = clamp(View.H > View.W ? Math.max(land, View.W / 640) : land, 0.42, 1.5);
 }
 
 let lastTs = 0, fpsN = 0, fpsT = 0, fpsChecks = 0;

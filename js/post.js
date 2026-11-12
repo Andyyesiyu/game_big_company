@@ -69,7 +69,7 @@ void main() {
   col *= 1.0 + (1.0 - grass) * (1.0 - water) * (1.0 - dirt) * (noise(wp * 0.7) - 0.5) * 0.09;
 
   // wind: bright bands rolling through the grass and the leaves
-  float gust = sin(wp.x * 0.011 + wp.y * 0.019 - uTime * 1.5 + n1 * 5.0);
+  float gust = sin(wp.x * 0.011 - wp.y * 0.019 + n1 * 5.0 + sin(uTime * 0.6) * 1.2) * (0.5 + 0.5 * sin(uTime * 1.1 + wp.y * 0.004));
   col += grass * smoothstep(0.74, 1.0, gust) * vec3(0.07, 0.09, 0.03);
 
   // water: slow swell plus sharp glints
@@ -96,7 +96,7 @@ void main() {
 
   // mist: thicker with distance, drifting in layers
   float depth = smoothstep(0.20, 1.0, uv.y);
-  float mist = fbm(vec2(uv.x * 2.4 + uTime * 0.018, uv.y * 4.6 - uTime * 0.010) + wp * 0.0007);
+  float mist = fbm(wp * vec2(0.0030, 0.0052) + vec2(sin(uTime * 0.05) * 0.6, uTime * 0.012));
   vec3 fogCol = mix(vec3(0.74, 0.84, 0.70), vec3(0.98, 0.76, 0.52), uDay);
   col = mix(col, fogCol, clamp(depth * 0.07 + mist * (0.04 + depth * 0.22), 0.0, 0.4));
 

@@ -41,7 +41,6 @@ function damageBoss(b, d) {
   if (b.stun > 0) d *= 1.5;
   b.hp -= d;
   b.flash = 0.08;
-  Sfx.play('hit');
   if (b.hp <= 0) bossDown(b);
 }
 
@@ -500,7 +499,9 @@ function drawBoss(b) {
       c.fillStyle = '#fff'; c.fillRect(48, -26, 8, 3);
     });
   } else {
-    lit(b.x, b.y, 0, 190, 190, (c) => {
+    const jit = b.hitAt !== undefined ? Math.max(0, 1 - (G.t - b.hitAt) / 0.2) : 0;
+    lit(b.x + Math.sin(G.t * 95) * 5 * jit, b.y, 0, 190, 190, (c) => {
+      if (b.flash > 0) c.scale(1.08, 0.94);
       const look = Object.assign({}, d.look, b.flash > 0 ? WHITE : null, {
         t: b.t, moving: b.moving, face: b.face, scale: S, kneel: b.down, armUp: b.charge > 0 || (b.shield && !b.down), scared: b.down || b.stun > 0, smile: d.look.smile && !b.down,
       });

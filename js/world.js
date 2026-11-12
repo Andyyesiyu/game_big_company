@@ -4,7 +4,7 @@ const G = {
   state: 'menu', t: 0, time: 0,
   player: null, boss: null, bosses: [], map: null, zone: null,
   enemies: [], bullets: [], ebullets: [], zones: [], lasers: [], pickups: [],
-  parts: [], floats: [], rings: [], obstacles: [], containers: [], exits: [], feed: [], wind: [], pets: [], slashes: [], ults: [],
+  parts: [], floats: [], rings: [], obstacles: [], containers: [], exits: [], feed: [], wind: [], pets: [], slashes: [], ults: [], sparks: [], corpses: [],
   hitstop: 0, combo: 0, comboT: 0, slowT: 0, day: 0,
   total: 30, kills: 0, signed: 0, exT: 0, exitsOpen: false, lastHit: '',
   flash: null, banner: null, boomCd: 0,
@@ -193,7 +193,7 @@ function addContainer(x, y, kind, poi = null) {
 }
 function genWorld() {
   const M = (G.map = { blobs: [], paths: [], stones: [], plazas: [], ponds: [], grass: [], grassRows: [], tufts: [] });
-  Object.assign(G, { obstacles: [], containers: [], exits: [], bosses: [], enemies: [], bullets: [], pickups: [], parts: [], floats: [], rings: [], feed: [], ebullets: [], pets: [], slashes: [], ults: [], hitstop: 0, combo: 0, comboT: 0, slowT: 0, boss: null });
+  Object.assign(G, { obstacles: [], containers: [], exits: [], bosses: [], enemies: [], bullets: [], pickups: [], parts: [], floats: [], rings: [], feed: [], ebullets: [], pets: [], slashes: [], ults: [], sparks: [], corpses: [], hitstop: 0, combo: 0, comboT: 0, slowT: 0, boss: null });
   clearHazards();
   const C = { x: ARENA.w / 2, y: ARENA.h / 2 };
 
@@ -324,7 +324,7 @@ function updateZone(dt) {
 // ---------- player ----------
 function makePlayer() {
   return {
-    x: 0, y: 0, z: 0, r: 14, hp: 100, maxhp: 100, armor: 0, tea: 2, speed: 255,
+    x: 0, y: 0, z: 0, r: 14, hp: 100, maxhp: 100, armor: 0, tea: 2, speed: 320, mvx: 0, mvy: 0, stepT: 0,
     aim: -Math.PI / 2, aimD: 260, t: 0, moving: false, face: 1, vx: 0, vy: 0,
     dashT: 0, dashKind: '', dashDir: { x: 1, y: 0 }, dashHit: null, lungeT: 0, lvx: 0, lvy: 0,
     swingT: 0, swingMax: 1, swingA: 0, swingHit: true, chain: 0, chainT: 0, castT: 0, castKind: '',
@@ -421,17 +421,34 @@ function hitTarget(t, dmg, o) {
   }
   const crit = !o.nocrit && rand() < 0.15 + (WEAPONS[p.weapon].crit || 0);
   dmg = Math.round(dmg * (crit ? 1.7 : 1) * rand(0.92, 1.08));
-  const big = o.heavy || crit;
-  floater(t.x + rand(-14, 14), t.y, 64 + rand(26), (crit ? T('crit') + ' ' : '') + dmg, crit ? '#ffe14d' : '#fff', crit ? 25 : 15 + Math.min(8, dmg / 8), 0.75);
-  burst(t.x, t.y, 30 + (t.z || 0), big ? 12 : 6, ['#fff', '#ffe08a', '#ffb347'], { sp: 300, up: 220, life: 0.35, size: 5 });
-  if (big) ring(t.x, t.y, 44, '#fff', 0.22);
-  G.hitstop = Math.max(G.hitstop, big ? 0.085 : 0.045);
-  View.shake = Math.max(View.shake, o.heavy ? 9 : crit ? 7 : 4);
+  const big = o.heavy || crit, a = o.a, hz = 30 + (t.z || 0);
+  // --- the impact ---
+  floater(t.x + rand(-14, 14), t.y, 64 + rand(26), (crit ? T('crit') + ' ' : '') + dmg, crit ? '#ffe14d' : '#fff', crit ? 26 : 16 + Math.min(9, dmg / 7), 0.8);
+  // contact point: between you and them, a burst of streaks thrown along the blow
+  const cx0 = t.x - Math.cos(a) * t.r * 0.6, cy0 = t.y - Math.sin(a) * t.r * 0.6;
+  G.sparks.push({ star: true, x: cx0, y: cy0, z: hz, t: 0, life: big ? 0.2 : 0.14, len: big ? 46 : 30, rot: rand(TAU) });
+  for (let i = 0, n = big ? 11 : 6; i < n; i++) G.sparks.push({ x: cx0, y: cy0, z: hz, a: a + rand(-1.0, 1.0), len: rand(40, big ? 150 : 95), t: 0, life: rand(0.12, 0.24), w: rand(2, big ? 5.5 : 3.5), col: i % 3 ? '#fff' : '#ffd66b' });
+  burst(t.x, t.y, hz, big ? 10 : 5, ['#fff', '#ffe08a', '#ffb347'], { sp: 300, up: 240, life: 0.4, size: 5 });
+  if (big) { ring(t.x, t.y, 56, '#fff', 0.2); G.flash = { color: '255,255,255', t: 0.07, max: 0.07, a: 0.14 }; }
+  // freeze, then shove the camera along the blow and punch the zoom
+  G.hitstop = Math.max(G.hitstop, o.heavy ? 0.12 : crit ? 0.1 : 0.06);
+  View.kx += Math.cos(a) * (big ? 13 : 5.5); View.ky += Math.sin(a) * YK * (big ? 13 : 5.5);
+  View.zk = Math.max(View.zk, big ? 0.05 : 0.014);
+  View.shake = Math.max(View.shake, o.heavy ? 8 : crit ? 6 : 2.5);
+  t.hitAt = G.t;
   G.combo++; G.comboT = 2.6;
-  if (big) Sfx.play('hit2');
+  Sfx.play(big ? 'hit2' : 'hit', G.combo);
+  if (big && Input.touch && navigator.vibrate) { try { navigator.vibrate(big && o.heavy ? 28 : 14); } catch (e) { /* not allowed here */ } }
   if (isBoss) { damageBoss(t, dmg); return true; }
-  if (o.kb) { t.kx += Math.cos(o.a) * o.kb; t.ky += Math.sin(o.a) * o.kb; }
+  // --- the reaction: knocked back, and staggered out of whatever they were doing ---
+  if (o.kb) { t.kx += Math.cos(a) * o.kb; t.ky += Math.sin(a) * o.kb; }
   if (o.stun) { t.stun = Math.max(t.stun, o.stun); if (o.air) t.air = t.stun; t.wind = 0; t.dashWind = 0; }
+  else if (!(t.poiseT > G.time)) {
+    // a few hits in a row and they grit their teeth: no more flinching for a moment, so they can answer back
+    t.flinch = (t.flinchAt > G.time - 1.5 ? t.flinch || 0 : 0) + 1; t.flinchAt = G.time;
+    if (t.flinch >= 5) { t.flinch = 0; t.poiseT = G.time + 1.6; }
+    else { t.stun = Math.max(t.stun, 0.22); t.wind = 0; t.dashWind = 0; }
+  }
   damageEnemy(t, dmg);
   return true;
 }
@@ -451,14 +468,15 @@ function startSwing(p) {
   p.chainT = w.swing + 0.75;
   p.swingT = p.swingMax = w.swing * (p.chain === 3 ? 1.25 : 1);
   p.swingA = p.aim; p.swingHit = false; p.fireT = 1.2;
-  Sfx.play('slash');
+  Sfx.play('slash', p.chain);
 }
 function resolveSwing(p) {
   const w = WEAPONS[p.weapon], fin = p.chain === 3, a = p.swingA;
   const reach = w.reach * (fin ? 1.18 : 1), half = w.arc * (fin ? 1.2 : 1);
-  G.slashes.push({ x: p.x, y: p.y, a, reach, half, t: 0, life: fin ? 0.24 : 0.17, col: TIER[w.tier], fin, dir: p.chain === 2 ? -1 : 1 });
+  G.slashes.push({ x: p.x, y: p.y, a, reach, half, t: 0, life: fin ? 0.28 : 0.2, col: TIER[w.tier], fin, dir: p.chain === 2 ? -1 : 1 });
+  View.kx += Math.cos(a) * 2; View.ky += Math.sin(a) * 1.2; // even a whiff nudges the camera
   forTargets((t) => {
-    if (inArc(p.x, p.y, a, reach, half, t)) hitTarget(t, w.dmg * (fin ? 1.5 : 1), { a: angTo(p.x, p.y, t.x, t.y), kb: w.kb * (fin ? 1.7 : 1), heavy: fin, stun: fin ? w.stun3 || 0 : 0 });
+    if (inArc(p.x, p.y, a, reach, half, t)) hitTarget(t, w.dmg * (fin ? 1.5 : 1), { a: angTo(p.x, p.y, t.x, t.y), kb: w.kb * (fin ? 2.1 : 1.25), heavy: fin, stun: fin ? w.stun3 || 0 : 0 });
   });
 }
 // Charged attack: a spin that launches everything around you. c is the charge, 0.4 to 1.
@@ -618,13 +636,13 @@ function updatePlayer(dt) {
   if (p.castT > 0) p.castT -= dt;
   if (p.swingT > 0) {
     p.swingT -= dt;
-    if (!p.swingHit && p.swingT <= p.swingMax * 0.55) { p.swingHit = true; resolveSwing(p); }
+    if (!p.swingHit && p.swingT <= p.swingMax * 0.68) { p.swingHit = true; resolveSwing(p); }
   }
 
   let vx, vy;
   if (p.dashT > 0) {
     p.dashT -= dt;
-    const sp = p.dashKind === 'e' ? 1500 : 800;
+    const sp = p.dashKind === 'e' ? 1500 : 900;
     vx = p.dashDir.x * sp; vy = p.dashDir.y * sp;
     part(p.x, p.y, rand(8, 40), { vx: -vx * 0.06, vy: -vy * 0.06, life: 0.25, color: p.dashKind === 'e' ? '#8fe8ff' : '#fff', size: 8, grav: 0, round: true });
     if (p.dashKind === 'e') {
@@ -636,9 +654,17 @@ function updatePlayer(dt) {
     }
   } else if (p.lungeT > 0) { p.lungeT -= dt; vx = p.lvx; vy = p.lvy; }
   else {
-    const f = p.castT > 0 ? 0 : p.swingT > 0 ? 0.45 : p.charge > 0 ? 0.55 : 1, m = Math.max(1, Math.hypot(mx, my));
-    vx = (mx / m) * p.speed * f; vy = (my / m) * p.speed * f;
+    // run: velocity eases towards the stick so starts and turns feel planted, not robotic
+    const f = p.castT > 0 ? 0 : p.swingT > 0 ? 0.5 : p.charge > 0 ? 0.6 : 1, m = Math.max(1, Math.hypot(mx, my));
+    const tx = (mx / m) * p.speed * f, ty = (my / m) * p.speed * f, k = 1 - Math.pow(tx || ty ? 1e-7 : 1e-10, dt);
+    p.mvx += (tx - p.mvx) * k; p.mvy += (ty - p.mvy) * k;
+    vx = p.mvx; vy = p.mvy;
+    if (Math.hypot(vx, vy) > p.speed * 0.8 && (p.stepT -= dt) <= 0) {
+      p.stepT = 0.16;
+      part(p.x - vx * 0.03, p.y - vy * 0.03, 2, { vx: -vx * 0.12 + rand(-20, 20), vy: -vy * 0.12 + rand(-20, 20), vz: rand(30, 70), life: 0.35, color: 'rgba(235,225,200,0.7)', size: rand(6, 10), grav: 60, round: true });
+    }
   }
+  if (p.dashT > 0 || p.lungeT > 0) { p.mvx = vx * 0.3; p.mvy = vy * 0.3; }
   p.vx = vx; p.vy = vy;
   p.x += vx * dt; p.y += vy * dt;
   p.moving = moving && p.castT <= 0;
@@ -663,11 +689,18 @@ function damageEnemy(e, d, b) {
   e.flash = 0.09; e.asleep = false;
   if (b && !b.lob) { const m = Math.hypot(b.vx, b.vy) || 1; e.kx += (b.vx / m) * 120; e.ky += (b.vy / m) * 120; }
   if (e.hp <= 0 && !e.dead) killEnemy(e, true);
-  else Sfx.play('hit');
+  else if (b) Sfx.play('hit'); // melee hits make their own sound in hitTarget
+}
+// Whoever you finish off is sent flying along the last blow before they vanish.
+function launchCorpse(e) {
+  const m = Math.hypot(e.kx, e.ky), a = m > 1 ? Math.atan2(e.ky, e.kx) : rand(TAU);
+  G.corpses.push({ e, x: e.x, y: e.y, z: e.z || 0, vx: Math.cos(a) * 460, vy: Math.sin(a) * 460, vz: 300, rot: 0, vr: (Math.cos(a) >= 0 ? 1 : -1) * rand(9, 14), t: 0 });
+  G.hitstop = Math.max(G.hitstop, 0.11);
+  View.zk = Math.max(View.zk, 0.045);
 }
 function killEnemy(e, byPlayer) {
   e.dead = true;
-  poof(e.x, e.y);
+  if (byPlayer) launchCorpse(e); else poof(e.x, e.y);
   if (!byPlayer) return;
   Sfx.play('kill');
   if (rand() < 0.14) dropItem(e.x, e.y, { kind: 'tea' });
@@ -779,9 +812,9 @@ function updateEnemies(dt) {
 
 // ---------- rivals: the other 29 people after the one remaining headcount ----------
 const RIVAL_KITS = [
-  { hp: 80, armor: 0, sight: 340, spread: 0.2, tea: 0, speed: 185, ws: ['stapler', 'stapler', 'fan'], loot: [100, 700] },
-  { hp: 110, armor: 25, sight: 370, spread: 0.15, tea: 1, speed: 195, ws: ['fan', 'keyboard', 'fan'], loot: [500, 3000] },
-  { hp: 140, armor: 60, sight: 400, spread: 0.11, tea: 2, speed: 205, ws: ['keyboard', 'board', 'book'], loot: [2500, 9000] },
+  { hp: 80, armor: 0, sight: 340, spread: 0.2, tea: 0, speed: 210, ws: ['stapler', 'stapler', 'fan'], loot: [100, 700] },
+  { hp: 110, armor: 25, sight: 370, spread: 0.15, tea: 1, speed: 222, ws: ['fan', 'keyboard', 'fan'], loot: [500, 3000] },
+  { hp: 140, armor: 60, sight: 400, spread: 0.11, tea: 2, speed: 235, ws: ['keyboard', 'board', 'book'], loot: [2500, 9000] },
 ];
 const RIVAL_TITLES = [
   [['Intern', '实习生'], ['New grad', '校招生'], ['Contractor', '外包']],
@@ -819,13 +852,12 @@ function damageRival(e, d, src) {
   e.flash = 0.09;
   if (src && e.fleeT <= 0) { e.target = src; e.alertT = 3; e.state = 'fight'; }
   if (e.hp <= 0) killRival(e, src);
-  else if (src === G.player) Sfx.play('hit');
 }
 function killRival(e, src, cause) {
   if (e.dead) return;
   e.dead = true;
-  poof(e.x, e.y);
   const p = G.player, name = rivalName(e);
+  if (src === p) launchCorpse(e); else poof(e.x, e.y);
   if (src === p) {
     G.kills++;
     Sfx.play('kill');
@@ -1237,11 +1269,23 @@ function updateFx(dt) {
   for (const f of G.feed) f.t -= dt;
   G.feed = G.feed.filter((f) => f.t > 0);
   // wind streaks drifting across the meadow
-  if (rand() < dt * 1.1 && G.wind.length < 5) G.wind.push({ x: rand(-0.2, 0.8), y: rand(0.1, 0.9), t: 0, life: rand(1.4, 2.2), len: rand(0.12, 0.22) });
+  if (rand() < dt * 1.1 && G.wind.length < 5) G.wind.push({ x: rand(-0.2, 0.8), y: rand(0.1, 0.9), t: 0, life: rand(1.4, 2.2), len: rand(0.12, 0.22), cx: View.cam.x, cy: View.cam.y });
   for (const w of G.wind) w.t += dt;
   G.wind = G.wind.filter((w) => w.t < w.life);
   if (G.flash && (G.flash.t -= dt) <= 0) G.flash = null;
   if (G.banner && (G.banner.t += dt) >= G.banner.dur) G.banner = null;
+  for (const s of G.sparks) s.t += dt;
+  G.sparks = G.sparks.filter((s) => s.t < s.life);
+  for (const c of G.corpses) {
+    c.t += dt; c.vz -= 900 * dt;
+    c.x = clamp(c.x + c.vx * dt, 20, ARENA.w - 20); c.y = clamp(c.y + c.vy * dt, 20, ARENA.h - 20); c.z = Math.max(0, c.z + c.vz * dt);
+    c.rot += c.vr * dt;
+    if (c.t > 0.1 && c.z <= 0) { c.dead = true; poof(c.x, c.y); }
+  }
+  G.corpses = G.corpses.filter((c) => !c.dead);
   G.boomCd -= dt;
   View.shake = Math.max(0, View.shake - dt * 30);
+  // the camera kick and zoom punch spring back fast
+  const kd = Math.pow(1e-6, dt);
+  View.kx *= kd; View.ky *= kd; View.zk *= Math.pow(1e-4, dt);
 }

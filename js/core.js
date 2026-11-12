@@ -172,15 +172,16 @@ const Sfx = {
     node.connect(g).connect(this.ctx.destination);
     s.start(this.ctx.currentTime + delay);
   },
-  play(name) {
+  // v: an optional variation (combo step / combo count) that shifts the pitch
+  play(name, v = 0) {
     switch (name) {
       case 'shoot': this.tone(620, 0.06, 'square', 0.03, -300); break;
       case 'keys': this.noise(0.08, 0.05, 0, 2500); this.tone(900, 0.04, 'square', 0.02); break;
       case 'lob': this.tone(300, 0.18, 'sine', 0.05, 200); break;
       case 'plane': this.tone(1100, 0.09, 'triangle', 0.04, -500); break;
       case 'book': this.tone(160, 0.14, 'sawtooth', 0.05, -60); break;
-      case 'hit': this.noise(0.05, 0.07, 0, 900); this.tone(190, 0.07, 'square', 0.05, -90); break;
-      case 'kill': this.tone(420, 0.1, 'square', 0.04, -300); this.noise(0.08, 0.04); break;
+      case 'hit': this.noise(0.06, 0.12, 0, 1100); this.tone(150 + (v % 5) * 14, 0.09, 'square', 0.08, -90); this.tone(70, 0.1, 'sine', 0.12, -25); break;
+      case 'kill': this.tone(520, 0.12, 'square', 0.06, -380); this.noise(0.14, 0.1, 0, 500); this.tone(64, 0.28, 'sine', 0.18, -24); break;
       case 'hurt': this.tone(140, 0.2, 'sawtooth', 0.08, -80); this.noise(0.12, 0.06); break;
       case 'dash': this.noise(0.12, 0.05, 0, 1800); break;
       case 'pickup': this.tone(660, 0.07, 'square', 0.04); this.tone(990, 0.1, 'square', 0.04, 0, 0.07); break;
@@ -194,8 +195,8 @@ const Sfx = {
       case 'dead': [400, 300, 200, 120].forEach((f, i) => this.tone(f, 0.22, 'sawtooth', 0.06, 0, i * 0.16)); break;
       case 'laser': this.tone(200, 0.3, 'sawtooth', 0.04, 300); break;
       case 'ui': this.tone(740, 0.05, 'square', 0.03); break;
-      case 'slash': this.noise(0.09, 0.06, 0, 2200); this.tone(520, 0.08, 'sawtooth', 0.025, -360); break;
-      case 'hit2': this.noise(0.12, 0.11, 0, 400); this.tone(120, 0.16, 'square', 0.09, -70); break;
+      case 'slash': this.noise(v === 3 ? 0.16 : 0.1, 0.07, 0, v === 3 ? 1400 : 2200); this.tone(430 + v * 90, v === 3 ? 0.14 : 0.08, 'sawtooth', 0.03, -360); break;
+      case 'hit2': this.noise(0.16, 0.2, 0, 300); this.tone(1700, 0.025, 'square', 0.07); this.tone(110, 0.18, 'square', 0.12, -70); this.tone(58, 0.3, 'sine', 0.22, -22); break;
       case 'ult': this.noise(0.5, 0.16); this.tone(70, 0.5, 'sine', 0.14, -30); this.tone(240, 0.25, 'square', 0.06, -150); break;
       case 'open': this.noise(0.1, 0.05, 0, 1200); this.tone(520, 0.08, 'triangle', 0.05, 200, 0.05); break;
     }
