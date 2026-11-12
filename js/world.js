@@ -202,7 +202,7 @@ function genWorld() {
   for (const d of POI_DEFS) {
     const pl = { x: d.x - 500, y: d.y - 360, w: 1000, h: 740, theme: d.id, id: d.id };
     M.plazas.push(pl);
-    G.obstacles.push({ k: 'box', x: d.x - 330, y: pl.y - 160, w: 660, d: 130, h: 190, bld: d.id });
+    G.obstacles.push({ k: 'box', x: d.x - 330, y: pl.y - 330, w: 660, d: 300, h: 190, bld: d.id });
     for (const q of POI_DESKS[d.id]) G.obstacles.push({ k: 'box', desk: true, theme: d.id, x: pl.x + q[0], y: pl.y + q[1], w: q[2], d: q[3], h: 36 });
     addContainer(d.x - 410, pl.y + 70, 'safe', d.id);
     addContainer(d.x + 410, pl.y + 70, 'safe', d.id);
@@ -467,7 +467,7 @@ function startSwing(p) {
   p.chain = p.chainT > 0 ? (p.chain % 3) + 1 : 1;
   p.chainT = w.swing + 0.75;
   p.swingT = p.swingMax = w.swing * (p.chain === 3 ? 1.25 : 1);
-  p.swingA = p.aim; p.swingHit = false; p.fireT = 1.2;
+  p.swingA = p.aim; p.swingHit = false; p.fireT = 1.2; p.swingN = (p.swingN || 0) + 1;
   Sfx.play('slash', p.chain);
 }
 function resolveSwing(p) {

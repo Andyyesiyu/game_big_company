@@ -264,8 +264,9 @@ R3.build = function () {
   }
 
   // --- trees: one instanced trunk and a handful of instanced leaf clusters each ---
-  const trees = G.obstacles.filter((o) => o.k === 'tree'), CL = 9;
-  if (trees.length) {
+  const trees = G.obstacles.filter((o) => o.k === 'tree'), CL = 9, useM = !!this.models;
+  this.trees = trees; this.leaf = null; this.treeInst = null;
+  if (trees.length && !useM) {
     const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(5, 10, 78, 10), std(0x8a6444, { roughness: 1, map: TEX.bark }), trees.length);
     const leaf = new THREE.InstancedMesh(lumpy(new THREE.SphereGeometry(1, 16, 12), 0.13), std(0xffffff, { roughness: 0.95, map: TEX.leaf }), trees.length * CL);
     trunk.castShadow = leaf.castShadow = true; trunk.receiveShadow = leaf.receiveShadow = true;
@@ -290,7 +291,8 @@ R3.build = function () {
 
   // --- rocks ---
   const rocks = G.obstacles.filter((o) => o.k === 'rock');
-  if (rocks.length) {
+  if (useM) this.modelNature(W, trees, rocks);
+  if (rocks.length && !useM) {
     const rk = new THREE.InstancedMesh(lumpy(new THREE.SphereGeometry(1, 14, 10), 0.16, 2.2), std(0xffffff, { roughness: 0.95, map: TEX.rock }), rocks.length);
     rk.castShadow = rk.receiveShadow = true;
     rocks.forEach((o, i) => {
@@ -334,7 +336,8 @@ R3.build = function () {
   this.lampMat = std(0xffb347, { emissive: 0xffa040, emissiveIntensity: 1.2 });
   for (const ob of G.obstacles) {
     if (ob.k !== 'box') continue;
-    if (ob.desk) { this.desks.set(ob, this.makeDesk(W, ob)); continue; }
+    if (ob.desk) { this.desks.set(ob, useM ? this.modelDesk(W, ob) : this.makeDesk(W, ob)); continue; }
+    if (useM) { this.modelBuilding(W, ob); continue; }
     const th = THEMES[ob.bld || 'shed'], g = new THREE.Group(), wallH = ob.h * 0.74;
     g.position.set(ob.x + ob.w / 2, 0, ob.y + ob.d / 2);
     const wt = TEX.wood.clone(), rt2 = TEX.roof.clone();
@@ -378,7 +381,7 @@ R3.build = function () {
     this.bld.push({ ob, g, mats: [wall, roof], a: 1 });
   }
   this.lang = null;
-  for (const k of G.containers) this.conts.set(k, this.makeContainer(W, k));
+  for (const k of G.containers) this.conts.set(k, useM ? this.modelContainer(W, k) : this.makeContainer(W, k));
   for (const e of G.exits) {
     const g = new THREE.Group();
     g.position.set(e.x, 0, e.y);
@@ -508,9 +511,23 @@ R3.syncWorld = function (dt) {
   for (const b of this.bld) {
     const ob = b.ob, hide = G.state === 'play' && p.y < ob.y + ob.d && p.y > ob.y - 420 && p.x > ob.x - 70 && p.x < ob.x + ob.w + 70;
     b.a = lerp(b.a, hide ? 0.22 : 1, 0.15);
-    for (const m of b.mats) { m.opacity = b.a; m.depthWrite = b.a > 0.9; }
+    if (b.sy) b.g.scale.y = b.sy * (0.06 + 0.94 * (b.a - 0.22) / 0.78); // model buildings sink out of the way, like the trees
+    else for (const m of b.mats) { m.opacity = b.a; m.depthWrite = b.a > 0.9; }
   }
-  if (this.trees) {
+  if (this.trees && this.treeInst) {
+    // model trees: the ones in your way squash down out of the shot
+    for (const o of this.trees) {
+      const hide = G.state === 'play' && p.y < o.y + 30 && p.y > o.y - 480 && Math.abs(p.x - o.x) < o.cr * 1.5 ? 1 : 0;
+      if (Math.abs(o._hide - hide) < 0.01) continue;
+      o._hide = lerp(o._hide, hide, 0.2);
+      const q = o._ti, k = 1 - o._hide * 0.78;
+      for (const im of this.treeInst[q.t]) {
+        this.m4.compose(this.v.set(q.x, 0, q.y), this.q.setFromAxisAngle(this.v2.set(0, 1, 0), q.rot), this.v2.set(q.s, q.s * k, q.s)).multiply(im.userData.local);
+        im.setMatrixAt(q.idx, this.m4); im.instanceMatrix.needsUpdate = true;
+      }
+    }
+  }
+  if (this.trees && this.leaf) {
     let dirty = false;
     for (let i = 0; i < this.trees.length; i++) {
       const o = this.trees[i], hide = G.state === 'play' && p.y < o.y + 30 && p.y > o.y - 480 && Math.abs(p.x - o.x) < o.cr * 1.5 ? 1 : 0;
@@ -528,11 +545,12 @@ R3.syncWorld = function (dt) {
   for (const [k, c] of this.conts) {
     if (k.opened && !c.open) {
       c.open = true; c.spark.visible = false;
-      if (k.kind === 'crate') { c.lid.rotation.x = -1.1; c.lid.position.set(0, 34, -18); }
+      if (c.model) { if (c.lid) c.lid.rotation.x -= 1.15; else for (const m of c.mats) m.color.multiplyScalar(0.55); }
+      else if (k.kind === 'crate') { c.lid.rotation.x = -1.1; c.lid.position.set(0, 34, -18); }
       else if (k.kind === 'locker') { c.lid.rotation.y = -1.3; c.lid.position.x = 20; c.lid.position.z = 18; }
       else { c.lid.material.emissiveIntensity = 0; c.lid.material.color.set(0x2a2438); }
     }
-    if (!k.opened) c.spark.position.y = (k.kind === 'locker' ? 74 : 52) + Math.sin(t * 3 + k.x) * 4;
+    if (!k.opened) c.spark.position.y = c.model ? c.spark.userData.h * (1 + Math.sin(t * 3 + k.x) * 0.07) : (k.kind === 'locker' ? 74 : 52) + Math.sin(t * 3 + k.x) * 4;
   }
   for (const x of this.exits) {
     x.ring.material.color.set(x.e.open ? 0x3fe08a : 0xffffff);
@@ -555,7 +573,7 @@ R3.frame = function (dt) {
   this.updateCamera();
   this.light();
   this.syncWorld(dt);
-  this.syncActors(dt);
+  this.syncActors(G.hitstop > 0 ? 0 : dt); // animations freeze with the world on a hit
   this.r.setRenderTarget(this.rt);
   this.r.render(this.scene, this.cam);
   this.r.setRenderTarget(null);

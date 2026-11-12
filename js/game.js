@@ -906,6 +906,7 @@ function boot() {
   c3 = document.getElementById('c3');
   R3.init(c3);
   R3.on = R3.ok && Settings.mode3d;
+  R3.loadModels(() => R3.build()); // swap the built-in shapes for the model library once it has decoded
   G.motes = [];
   for (let i = 0; i < 44; i++) G.motes.push({ x: rand(), y: rand(), s: rand(1.2, 3), ph: rand(TAU), v: rand(0.008, 0.03) });
   resize();

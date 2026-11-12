@@ -194,6 +194,15 @@ function rigFlash(R, on, sq) {
   R.g.scale.set(s * (on && sq ? 1.2 : 1), s * (on && sq ? 0.84 : 1), s * (on && sq ? 1.2 : 1));
 }
 
+R3.makeEnemyRig = function (e) {
+  const M = this.models;
+  if (e.type === 'rival') return M ? rigChar(e._m || (e._m = pick(RIVAL_MODELS))) : rigPerson(e.look);
+  if (e.type === 'hr') return M ? rigChar('Suit_Female') : rigPerson(HR_LOOK);
+  if (e.type === 'manager') return M ? rigChar('Suit_Male', 1.3) : rigPerson(MGR_LOOK, 1.35);
+  if (M && e.type === 'agent') return rigRobot(34, '#2fd3b5');
+  if (M && e.type === 'gpt') return rigRobot(50, '#f2f2ec');
+  return rigCreature(e.type);
+};
 const yaw = (a) => Math.PI / 2 - a; // world angle -> three rotation about Y for a rig that faces +z
 R3.rigFor = function (e, make) {
   let R = this.ents.get(e);
@@ -210,12 +219,22 @@ R3.syncActors = function (dt) {
 
   // --- you ---
   if (play && p.hp > 0) {
-    const R = this.playerRig || (this.playerRig = (() => { const q = rigPerson(PLAYER_LOOK); this.dyn.add(q.g); return q; })());
+    const R = this.playerRig || (this.playerRig = (() => { const q = this.models ? rigChar('Casual_Male', 1, '#f6d3b3') : rigPerson(PLAYER_LOOK); this.dyn.add(q.g); return q; })());
     R.g.visible = !(p.inv > 0 && p.dashT <= 0 && Math.floor(p.t * 22) % 2);
     setWeapon(R, p.weapon);
     R.g.position.set(p.x, 0, p.y);
     R.g.rotation.y = yaw(p.swingT > 0 ? p.swingA : p.aim);
-    poseRig(R, { t: p.t, moving: p.moving, pace: 15, swing: p.swingT > 0 ? 1 - p.swingT / p.swingMax : null, dir: p.chain === 2 ? -1 : 1, armUp: p.castT > 0 || p.charge > 0.3 });
+    if (R.model) {
+      if (p.swingT > 0) animSet(R, 'Punch', { once: true, key: p.swingN, speed: 0.75 / (p.swingMax * 1.3), fade: 0.04 });
+      else if (p.castT > 0 || p.charge > 0.3) animSet(R, 'Victory', { speed: 1.6 });
+      else if (p.dashT > 0) animSet(R, 'Walk', { speed: 3.2 });
+      else if (p.moving) animSet(R, 'Walk', { speed: 2.1 });
+      else animSet(R, 'Idle');
+      R.inner.rotation.x = p.dashT > 0 ? 0.45 : p.moving ? 0.12 : 0;
+      R.mixer.update(dt);
+      const sw = p.swingT > 0 ? 1 - p.swingT / p.swingMax : -1;
+      aimWeapon(R, sw >= 0 ? lerp(1.25, 0.1, sw) : p.charge > 0.3 ? 1.5 : 0.85, sw >= 0 ? (p.chain === 2 ? -1 : 1) * lerp(-1.25, 1.25, sw * sw * (3 - 2 * sw)) : 0.25);
+    } else poseRig(R, { t: p.t, moving: p.moving, pace: 15, swing: p.swingT > 0 ? 1 - p.swingT / p.swingMax : null, dir: p.chain === 2 ? -1 : 1, armUp: p.castT > 0 || p.charge > 0.3 });
     for (const m of R.mats) { m.transparent = p.hidden; m.opacity = p.hidden ? 0.6 : 1; }
     if (p.charge > 0.2) {
       const c = p.charge / 1.2, ready = p.charge >= 0.45, ring = this.get('charge', () => flat(GEO.ringThin, glowMat(0xffe08a)));
@@ -228,15 +247,24 @@ R3.syncActors = function (dt) {
   for (const e of G.enemies) {
     if (!near(e.x, e.y)) continue;
     const rival = e.type === 'rival', personish = rival || e.type === 'hr' || e.type === 'manager';
-    const R = this.rigFor(e, () => (rival ? rigPerson(e.look) : e.type === 'hr' ? rigPerson(HR_LOOK) : e.type === 'manager' ? rigPerson(MGR_LOOK, 1.35) : rigCreature(e.type)));
+    const R = this.rigFor(e, () => this.makeEnemyRig(e));
     const rise = e.spawnT > 0 ? e.spawnT / 0.6 : 0, j = jit(e);
     R.g.position.set(e.x + Math.sin(t * 95) * 5 * j, (e.z || 0) + rise * 40, e.y);
     R.g.rotation.y = yaw(rival ? (e.wind > 0 ? e.windA : e.aim) : angTo(e.x, e.y, p.x, p.y));
     R.g.rotation.z = e.stun > 0 ? Math.sin(t * 18) * 0.16 : 0;
-    if (personish) {
-      if (rival) setWeapon(R, e.w);
-      poseRig(R, { t: e.t, moving: rival ? e.moving : !e.asleep && e.stun <= 0, pace: 13, armUp: e.wind > 0, swing: null });
-    } else poseCreature(R, e.t, !e.asleep);
+    if (rival && R.person) setWeapon(R, e.w);
+    if (R.model) {
+      const wdt = dt * (G.slowT > 0 ? 0.28 : 1);
+      if (R.robot) animSet(R, e.asleep ? 'Idle' : e.type === 'agent' ? 'Running' : 'Walking');
+      else if (e.stun > 0) animSet(R, 'RecieveHit', { speed: 1.3 });
+      else if (e.wind > 0) { if (!R.winding) { R.winding = true; R.wk = (R.wk || 0) + 1; } animSet(R, 'Punch', { once: true, key: R.wk, speed: 0.34 / e.windMax, fade: 0.05 }); }
+      else if (rival ? e.moving : !e.asleep) animSet(R, 'Walk', { speed: rival ? 1.8 : 1.3 });
+      else animSet(R, 'Idle');
+      if (!(e.wind > 0)) R.winding = false;
+      R.mixer.update(wdt);
+      if (R.person) aimWeapon(R, e.wind > 0 ? 1.45 : 0.85, 0.25);
+    } else if (personish) poseRig(R, { t: e.t, moving: rival ? e.moving : !e.asleep && e.stun <= 0, pace: 13, armUp: e.wind > 0, swing: null });
+    else poseCreature(R, e.t, !e.asleep);
     rigFlash(R, e.flash > 0, true);
     if (rival && e.wind > 0) {
       // red wedge: where this swing is about to land
@@ -258,6 +286,7 @@ R3.syncActors = function (dt) {
     R.g.position.set(c.x, c.z + 26, c.y);
     R.g.rotation.set(c.rot * 0.6, R.g.rotation.y, c.rot);
     rigFlash(R, c.t < 0.1, false);
+    if (R.model) { animSet(R, R.robot ? 'Death' : 'Defeat', { once: true, speed: 2.5 }); R.mixer.update(dt); }
   }
 
   // --- the bosses ---
@@ -269,7 +298,15 @@ R3.syncActors = function (dt) {
     R.g.position.set(b.x + Math.sin(t * 95) * 5 * j, 0, b.y);
     R.g.rotation.y = yaw(charging ? b.data.ca : angTo(b.x, b.y, p.x, p.y));
     R.g.rotation.z = b.stun > 0 ? Math.sin(t * 16) * 0.14 : 0;
-    poseRig(R, { t: b.t, moving: b.moving, pace: 10, armUp: b.charge > 0 || !!b.shield, kneel: b.down, swing: null });
+    if (R.model) {
+      if (b.down) animSet(R, 'SitDown', { once: true });
+      else if (b.stun > 0) animSet(R, 'RecieveHit');
+      else if (b.charge > 0 || b.shield) animSet(R, 'Victory', { speed: 1.4 });
+      else if (b.moving) animSet(R, 'Walk', { speed: 1.3 });
+      else animSet(R, 'Idle');
+      R.mixer.update(dt * (G.slowT > 0 ? 0.28 : 1));
+      aimWeapon(R, b.charge > 0 || b.shield ? 1.5 : 1.0, 0);
+    } else poseRig(R, { t: b.t, moving: b.moving, pace: 10, armUp: b.charge > 0 || !!b.shield, kneel: b.down, swing: null });
     rigFlash(R, b.flash > 0, false);
     R.truck.visible = charging;
     if (R.glow) R.glow.material.emissiveIntensity = 0.4 + (b.charge > 0 ? (1 - b.charge / 1.3) * 5 : 0);
@@ -285,10 +322,10 @@ R3.syncActors = function (dt) {
 
   // --- sidekicks ---
   for (const q of G.pets) {
-    const R = this.rigFor(q, () => rigCreature(q.type));
+    const R = this.rigFor(q, () => (this.models && q.type === 'gpt' ? rigRobot(48, '#f2f2ec') : rigCreature(q.type)));
     R.g.position.set(q.x, q.type === 'doubao' ? Math.abs(Math.sin(q.t * 5)) * 6 : 0, q.y);
     R.g.rotation.y = yaw(q.face > 0 ? 0 : Math.PI);
-    poseCreature(R, q.t, q.moving);
+    if (R.model) { animSet(R, q.moving ? 'Running' : 'Idle'); R.mixer.update(dt); } else poseCreature(R, q.t, q.moving);
     const ring = this.get('petring', () => flat(GEO.ringThin, basic(0x5df09a, { side: THREE.DoubleSide })));
     ring.position.set(q.x, 2.4, q.y); ring.scale.setScalar(18); ring.material.opacity = 0.8;
   }
@@ -426,7 +463,7 @@ R3.syncActors = function (dt) {
 };
 
 R3.makeBossRig = function (b) {
-  const R = rigPerson(b.def.look, 1.45), gold = std(0xd4a017, { metalness: 0.7, roughness: 0.3, emissive: 0xffc94a, emissiveIntensity: 0.4 });
+  const R = this.models ? rigChar(BOSS_MODELS[b.id], 1.45) : rigPerson(b.def.look, 1.45), gold = std(0xd4a017, { metalness: 0.7, roughness: 0.3, emissive: 0xffc94a, emissiveIntensity: 0.4 });
   R.mats.push(gold);
   const part = (parent, geo, mat, s, x, y, z) => { const m = mesh(parent, geo, mat, x, y, z); m.scale.set(s[0], s[1], s[2]); R.mats.includes(mat) || R.mats.push(mat); return m; };
   if (b.id === 'pony') { R.glow = part(R.hand, GEO.box, gold, [10, 13, 10], 0, -2, 0); ['#e040fb', '#448aff', '#ff5252', '#ffab40', '#69f0ae'].forEach((c, i) => part(R.hand, GEO.ball, std(c, { emissive: c, emissiveIntensity: 1.5 }), [1.6, 1.6, 1.6], -4 + i * 2, -2, 5.4)); }

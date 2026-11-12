@@ -86,12 +86,16 @@ The simulation is a flat plane (x, y, plus a height), and two renderers can draw
 
 **3D (default).** `js/r3world.js` and `js/r3actors.js` draw the world with Three.js: a
 third-person chase camera looking north, a sun with soft shadow maps whose angle and
-colour run from noon to dusk over a match, exponential fog, instanced trees (smooth leaf
-clusters with a painted foliage texture), instanced wind-swayed grass, rocks, timber
-buildings with gabled roofs, lanterns and windows that light up towards evening, and
-characters built from capsules and spheres with procedural walk and attack animation.
-Every texture (ground, foliage, bark, rock, planks, roof tiles) is painted in code at
-start-up. A final full-screen shader adds bloom, sun shafts, the colour grade and grain.
+colour run from noon to dusk over a match, exponential fog, instanced wind-swayed grass,
+lanterns that light up towards evening, and a final full-screen shader that adds bloom,
+sun shafts, the colour grade and grain.
+
+The people, robots, trees, rocks, buildings, desks and loot containers are free CC0
+models (see [CREDITS.md](CREDITS.md)), packed into `assets/models.js` and loaded by
+`js/r3models.js`. Everyone shares one skeleton and one set of animation clips (idle,
+walk, punch, hit, defeat, sit, cheer). The office weapons, the penguins, Doubao, the crab
+and the drones are still built in code, as are the ground textures. If the model bundle
+is missing or fails to decode, the renderer keeps its built-in capsule-and-box shapes.
 Trees and buildings between you and the camera shrink or turn glassy so you stay visible.
 The HUD, name tags and damage numbers are a 2D canvas layered on top.
 
@@ -109,11 +113,14 @@ with the Graphics button in the menu.
 | `js/post.js` | the WebGL lighting pass for the 2D renderer |
 | `js/r3world.js` | 3D renderer: scene, procedural textures, static world, camera, sun and fog, post shader |
 | `js/r3actors.js` | 3D renderer: character and creature rigs, per-frame sync of everything that moves, effects, the 2D overlay |
-| `vendor/three.min.js` | Three.js r149 (MIT), vendored so the game runs offline |
+| `js/r3models.js` | 3D renderer: loads the model library, animated character rigs, model trees, buildings, desks and containers |
+| `assets/models.js` | the model library: 32 trimmed GLB files as base64 (about 8 MB), so the game still runs from `file://` |
+| `tools/build-models.mjs` | how `assets/models.js` was made from the source packs (needs the downloads listed in CREDITS.md) |
+| `vendor/` | Three.js r149 plus its glTF loader and SkeletonUtils (MIT), vendored so the game runs offline |
 | `js/world.js` | game state, map generation, action combat (combos, skills, hit feel), loot, rivals' AI, the circle, hazards, sidekicks |
 | `js/bosses.js` | boss framework plus the five attack decks |
 | `js/game.js` | match flow, render loop, HUD, skill buttons, minimap, menus, the severance fund |
 | `js/i18n.js` | every string, in English and Chinese |
 
-There are no image, model or audio assets. The earlier tower-climb and shooter versions of
-the game are in the git history.
+There are no image or audio files; sound is synthesised. The earlier tower-climb and
+shooter versions of the game are in the git history.
