@@ -1,12 +1,12 @@
-# The Layoff Games · 优化游戏
+# The Layoff Games · 优化游戏 — Campus Royale / 产业园大逃杀
 
-A 2.5D arena shooter about the AI boom. The AI writes the code, the docs and the
-layoff emails; 10,000 employees are invited to a "performance review" in the tower.
-You are employee #0035. Grab whatever is on the desk, survive five elimination
-floors, and make every CEO sign N+1 for everyone.
+A cel-shaded 2.5D loot-and-extract battle royale about the AI boom.
+Thirty employees drop into a tech campus and there is one headcount left.
+Search boxes, lockers and safes, stay inside the shrinking **optimization circle**,
+then either catch a shuttle out with everything in your bag or be the last one employed.
 
 **Parody and fiction.** Not affiliated with or endorsed by any person or company
-named. Nobody gets hurt — the bosses just sign the severance papers.
+named. Nobody gets hurt: they go up in a puff of smoke, or sign the severance papers.
 
 ## Play
 
@@ -27,42 +27,50 @@ node tools/build-standalone.js
 | Move | WASD / arrows | left thumb |
 | Aim & shoot | mouse | right thumb (auto-aims and fires if you let go) |
 | Dash (brief invulnerability) | Space / Shift / right-click | 💨 |
+| Drink bubble tea (+40 HP) | F | 🧋 |
 | Switch weapon | Q / E, 1–5, wheel | 🔁 |
-| Pause / mute | Esc or P / M | ⏸ |
+| Pause | Esc or P | ⏸ |
 
 English and 中文 are both built in (toggle on the title screen).
 
-## How a floor works
+## How a match works
 
-1. **Performance review.** Minions pour in. Every few seconds the floor turns red and
-   a countdown starts — get into a green zone before it hits zero. Coworkers who
-   don't make it turn to dust and the headcount ticker drops.
-2. **The CEO steps out of the elevator.** Every attack is telegraphed; dash through
-   what you can't outrun.
-3. **Pick an employee benefit** (paid leave, side hustle, union card…) and go up.
+- **Loot.** Stand next to a container to search it. Crates are everywhere; lockers sit at
+  small work sites; safes are inside the five CEO plazas. Valuables come in six colour
+  tiers, from a badge lanyard up to the red one: a **signed N+1 agreement**.
+- **The circle.** The purple optimization circle shrinks in five phases over about five
+  minutes and hurts more each phase. The minimap shows the next circle as a dashed ring.
+- **Rivals.** The other 29 employees loot, rotate with the circle, fight you and each
+  other, flee when hurt, and sometimes take the shuttle themselves. Tall grass hides you
+  from them until you shoot.
+- **Extract or win.** Shuttles arrive 40 seconds in. Stand at a stop for 5 seconds to
+  bank everything you carry into your severance fund, which buys better starting kits.
+  Or be the last one standing for a bonus. Get optimized and you lose what you carried.
+- **CEOs.** Each plaza has a boss who only wakes when you walk in. Every attack is
+  telegraphed. Beat one and they sign: you get the red item, and their AI switches sides.
 
-| Floor | Boss | Signature moves |
-|---|---|---|
-| 1 Penguin Tower | 马化腾 · Pony | red-envelope fans, penguin squads, the gauntlet *snap* |
-| 2 Infinite Scroll Inc. | 张一鸣 · Yiming | feed lanes that sweep the floor, homing "recommended for you" notes, delayed gratification |
-| 3 Hardcore Mars Corp. | Elon | rocket rain, the not-a-flamethrower, a truck charge that stuns him when he hits the wall |
-| 4 AGI Soon Ltd. | Sam | GPU spirals, agent swarms, a funding round you must interrupt — and the board fires him once |
-| 5 Safety First Labs | Dario | orbiting shields, a 15,000-word essay beam, "I can't help with that" reflection, escalating ASL phases |
+| Plaza | Boss | Signature moves | Guards → sidekick |
+|---|---|---|---|
+| Penguin Tower | 马化腾 · Pony | red-envelope fans, penguin squads, the gauntlet snap | penguins |
+| Infinite Scroll Inc. | 张一鸣 · Yiming | feed lanes sweeping the plaza, homing "recommended for you" notes, delayed gratification | **Doubao** → orders you a bubble tea now and then |
+| Hardcore Mars Corp. | Elon | rocket rain, the not-a-flamethrower, a truck charge that stuns him on the wall | drones |
+| AGI Soon Ltd. | Sam | GPU spirals, agent swarms, a funding round to interrupt, and the board fires him once | **GPT bot** → shoots at range for you |
+| Safety First Labs | Dario | orbiting shields, a 15,000-word essay beam, "I can't help with that" reflection, escalating ASL phases | **Claude crab** → pinches whatever gets close |
 
-Weapons come from delivery crates: stapler (infinite), mech keyboard (shotgun of
-keycaps), iced americano (lobbed splash — goes over shields), resignation letter
-(piercing paper plane), and the Labor Law (a boomerang, as it should be).
+Weapons: stapler (infinite), mech keyboard (shotgun of keycaps), iced americano (lobbed
+splash, goes over shields), resignation letter (piercing paper plane) and the Labor Law
+(a boomerang, as it should be). Plaid shirts are armour.
 
 ## Code map
 
 | File | What's in it |
 |---|---|
 | `js/core.js` | math helpers, keyboard/mouse/touch input, tiny WebAudio synth |
-| `js/draw.js` | the 2.5D projection, procedurally drawn characters, floor/wall/desks |
-| `js/world.js` | game state, player, weapons, minions, hazards (bullets, zones, lasers), coworkers |
+| `js/draw.js` | the 2.5D projection and all the cel-shaded art: characters, terrain, trees, buildings, loot |
+| `js/world.js` | game state, map generation, player, loot, rivals' AI, the circle, hazards, sidekicks |
 | `js/bosses.js` | boss framework plus the five attack decks |
-| `js/game.js` | floors, review mechanic, render loop, HUD, menus |
+| `js/game.js` | match flow, render loop, HUD, minimap, menus, the severance fund |
 | `js/i18n.js` | every string, in English and Chinese |
 
-Everything is drawn with canvas primitives — there are no image or audio assets.
-`index.html?floor=3` jumps to a floor and `?floor=3&boss=1` straight to its boss.
+Everything is drawn with canvas primitives: there are no image or audio assets. The
+earlier tower-climb version of the game is in the git history.

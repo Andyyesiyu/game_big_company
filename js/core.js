@@ -170,6 +170,7 @@ const Sfx = {
       case 'dead': [400, 300, 200, 120].forEach((f, i) => this.tone(f, 0.22, 'sawtooth', 0.06, 0, i * 0.16)); break;
       case 'laser': this.tone(200, 0.3, 'sawtooth', 0.04, 300); break;
       case 'ui': this.tone(740, 0.05, 'square', 0.03); break;
+      case 'open': this.noise(0.1, 0.05, 0, 1200); this.tone(520, 0.08, 'triangle', 0.05, 200, 0.05); break;
     }
   },
 };

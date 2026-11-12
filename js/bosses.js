@@ -5,15 +5,18 @@
 const after = (b, t, fn) => b.q.push({ t, fn });
 const aimP = (b) => angTo(b.x, b.y, G.player.x, G.player.y);
 function say(b, text, dur = 2) { b.say = text; b.sayT = dur; }
-const cx = (x) => clamp(x, 60, ARENA.w - 60);
-const cy = (y) => clamp(y, 70, ARENA.h - 60);
+// Every boss is leashed to its own plaza; attacks are laid out relative to it.
+let HOME = { x: 0, y: 0, w: ARENA.w, h: ARENA.h };
+const cx = (x) => clamp(x, HOME.x + 60, HOME.x + HOME.w - 60);
+const cy = (y) => clamp(y, HOME.y + 70, HOME.y + HOME.h - 60);
+const bossName = (b) => T('n_' + b.id);
 
-function makeBoss(id) {
+function makeBoss(id, home) {
   const d = BOSSES[id];
   const b = {
-    id, def: d, x: ARENA.w / 2, y: 40, z: 0, r: 24, hp: d.hp, maxhp: d.hp, t: 0, face: 1,
-    q: [], busy: 0, cool: 1.2, phase: 1, flash: 0, say: null, sayT: 0, mode: 'orbit', orbitDir: pick([-1, 1]),
-    stun: 0, last: -1, contactCd: 0, charge: 0, reflect: 0, shield: null, data: {}, moving: false,
+    id, def: d, home, x: home.x + home.w / 2, y: home.y + 130, z: 0, r: 24, hp: d.hp, maxhp: d.hp, t: rand(10), face: 1,
+    q: [], busy: 0, cool: 1.6, phase: 1, flash: 0, say: null, sayT: 0, mode: 'orbit', orbitDir: pick([-1, 1]),
+    stun: 0, last: -1, contactCd: 0, charge: 0, reflect: 0, shield: null, data: {}, moving: false, met: false,
   };
   if (d.init) d.init(b);
   return b;
@@ -37,7 +40,6 @@ function damageBoss(b, d) {
   if (b.stun > 0) d *= 1.5;
   b.hp -= d;
   b.flash = 0.08;
-  G.score += Math.round(d);
   Sfx.play('hit');
   if (b.hp <= 0) bossDown(b);
 }
@@ -46,23 +48,29 @@ function bossDown(b) {
   if (b.def.onDeath && b.def.onDeath(b)) return;
   b.down = true; b.hp = 0; b.q = []; b.shield = null; b.reflect = 0; b.charge = 0; b.mode = 'still';
   clearHazards();
-  for (const e of G.enemies) killEnemy(e, false);
-  G.enemies = [];
-  G.phase = 'bossdown'; G.phaseT = 3.8;
-  say(b, T('q_sign'), 3.6);
-  banner(T('boss_down'), T('boss_down_sub'), 3.2, '#69f0ae');
+  for (const e of G.enemies) if (e.type !== 'rival' && !e.asleep) killEnemy(e, false);
+  say(b, T('q_sign'), 5);
+  banner(T('boss_down'), T('boss_down_sub'), 3.2, '#7df0a0');
+  feed(T('feed_signed', bossName(b)), '#ff8a8f');
   burst(b.x, b.y, 40, 60, ['#69f0ae', '#ffd54f', '#fff', '#4fc3f7'], { sp: 320, up: 420, life: 1.4 });
   Sfx.play('win');
-  G.score += 500;
-  G.headcount += randi(150, 350);
-  G.hcDelta = { n: 1, t: 2, text: T('rehired') };
+  G.signed++;
   View.shake = 14;
+  // the red item: a signed N+1 agreement, plus whatever was in their pockets
+  dropItem(b.x, b.y + 20, { kind: 'val', key: 'v_n1', tier: 5, value: 60000 });
+  dropItem(b.x, b.y + 20, rollVal(3, 4));
+  dropItem(b.x, b.y + 20, rollVal(2, 3));
+  dropItem(b.x, b.y + 20, { kind: 'tea' });
+  dropItem(b.x, b.y + 20, { kind: 'armor', amt: 100 });
+  for (const k of G.containers) if (k.poi === b.id) k.poi = null;
+  if (PET_OF[b.id]) addPet(PET_OF[b.id]);
 }
 
 function updateBoss(dt) {
   const b = G.boss;
   if (!b) return;
   const d = b.def, p = G.player;
+  HOME = b.home;
   b.t += dt; b.flash -= dt; b.sayT -= dt; b.contactCd -= dt;
   if (b.q.length) {
     for (const it of b.q) it.t -= dt;
@@ -70,7 +78,7 @@ function updateBoss(dt) {
     b.q = b.q.filter((i) => i.t > 0);
     for (const it of due) it.fn();
   }
-  if (b.gone || b.down || G.phase !== 'boss') return;
+  if (b.gone || b.down) return;
   if (b.reflect > 0) b.reflect -= dt;
   if (b.charge > 0) b.charge -= dt;
   if (b.shield && (b.shield.t -= dt) <= 0) { const s = b.shield; b.shield = null; s.onEnd(); }
@@ -92,7 +100,7 @@ function updateBoss(dt) {
     pushOut(b);
   }
   if (b.mode !== 'charge') b.face = p.x >= b.x ? 1 : -1;
-  if (dist(b.x, b.y, p.x, p.y) < b.r + p.r && b.contactCd <= 0 && hurtPlayer(b.mode === 'charge' ? 26 : 12)) b.contactCd = 0.7;
+  if (dist(b.x, b.y, p.x, p.y) < b.r + p.r && b.contactCd <= 0 && hurtPlayer(b.mode === 'charge' ? 26 : 12, false, bossName(b))) b.contactCd = 0.7;
 
   if (b.busy > 0) b.busy -= dt;
   else if ((b.cool -= dt) <= 0) {
@@ -118,8 +126,8 @@ const summonAround = (b, type, n) => {
 const BOSSES = {
   // Floor 1 — the gauntlet snap that turns the headcount to dust.
   pony: {
-    hp: 850, speed: 105, dist: 330, rest: 1.0, phaseAt: [0.5],
-    look: { top: '#1f2a44', shirt: '#fff', bottom: '#1b2233', skin: '#f0c8a0', hair: '#1b1b1b', hairStyle: 'side', glasses: '#37474f', smile: true },
+    hp: 700, speed: 105, dist: 330, rest: 1.0, phaseAt: [0.5],
+    look: { top: '#34466e', shirt: '#fff', bottom: '#2b3654', skin: '#f0c8a0', hair: '#1b1b1b', hairStyle: 'side', glasses: '#37474f', smile: true },
     onPhase(b) { say(b, T('q_pony_p2'), 2.4); Sfx.play('boss'); },
     attacks: [
       [function envelopes(b) {
@@ -150,13 +158,11 @@ const BOSSES = {
           View.shake = 12;
           const zs = [[p.x, p.y, 110]];
           for (let i = 0; i < 4 + b.phase; i++) zs.push([p.x + rand(-380, 380), p.y + rand(-300, 300), rand(70, 100)]);
-          G.coworkers.slice(0, 2).forEach((c) => zs.push([c.x, c.y, 80]));
           zs.forEach(([x, y, r], i) => zone(cx(x), cy(y), r, 0.95 + i * 0.07, { look: 'snap', dmg: 20 }));
           if (b.phase > 1) {
-            const band = Math.floor(clamp(p.x, 0, ARENA.w - 1) / (ARENA.w / 3));
-            rectZone((band * ARENA.w) / 3, 0, ARENA.w / 3, ARENA.h, 2.1, { look: 'snap', dmg: 26 });
+            const band = Math.floor(clamp(p.x - HOME.x, 0, HOME.w - 1) / (HOME.w / 3));
+            rectZone(HOME.x + (band * HOME.w) / 3, HOME.y, HOME.w / 3, HOME.h, 2.1, { look: 'snap', dmg: 26 });
           }
-          layoff(randi(500, 900));
         });
         return b.phase > 1 ? 4.0 : 3.0;
       }],
@@ -165,25 +171,24 @@ const BOSSES = {
 
   // Floor 2 — the feed never ends.
   yiming: {
-    hp: 1050, speed: 118, dist: 340, rest: 0.9, phaseAt: [0.5],
+    hp: 820, speed: 118, dist: 340, rest: 0.9, phaseAt: [0.5],
     look: { top: '#607d8b', bottom: '#263238', skin: '#f0c8a0', hair: '#1b1b1b', hairStyle: 'short', glasses: '#212121' },
     onPhase(b) { say(b, T('q_ym_p2'), 2.4); Sfx.play('boss'); },
     attacks: [
       [function feed(b) {
         say(b, T('q_ym_feed'));
-        const lanes = 5, h = ARENA.h / lanes;
-        const pl = Math.floor(clamp(G.player.y, 0, ARENA.h - 1) / h);
+        const lanes = 5, h = HOME.h / lanes, hm = HOME;
+        const pl = Math.floor(clamp(G.player.y - HOME.y, 0, HOME.h - 1) / h);
         const safe = clamp(pl + pick([-1, 0, 1]), 0, lanes - 1);
         const wave = (skip, delay) => {
           for (let i = 0; i < lanes; i++) {
             if (i === skip || (b.phase === 1 && i === (skip + 2) % lanes)) continue;
-            rectZone(0, i * h, ARENA.w, h, delay, { look: 'feed', dmg: 18, linger: 0.45 });
+            rectZone(hm.x, hm.y + i * h, hm.w, h, delay, { look: 'feed', dmg: 18, linger: 0.45 });
           }
         };
         wave(safe, 1.2);
         const s2 = safe + (safe === 0 ? 1 : safe === lanes - 1 ? -1 : pick([-1, 1]));
         after(b, 1.35, () => wave(s2, 1.1));
-        layoff(randi(200, 500));
         return 3.1;
       }],
       [function notes(b) {
@@ -205,12 +210,12 @@ const BOSSES = {
       }],
       [function columns(b) {
         say(b, T('q_ym_scroll'));
-        const cols = 6, w = ARENA.w / cols;
-        const pc = Math.floor(clamp(G.player.x, 0, ARENA.w - 1) / w);
+        const cols = 6, w = HOME.w / cols;
+        const pc = Math.floor(clamp(G.player.x - HOME.x, 0, HOME.w - 1) / w);
         const safe = clamp(pc + pick([-1, 1]), 0, cols - 1);
         for (let i = 0; i < cols; i++) {
           if (i === safe || i === (safe + 3) % cols) continue;
-          rectZone(i * w, 0, w, ARENA.h, 1.35, { look: 'feed', dmg: 18, linger: 0.45 });
+          rectZone(HOME.x + i * w, HOME.y, w, HOME.h, 1.35, { look: 'feed', dmg: 18, linger: 0.45 });
         }
         return 2.2;
       }, 2],
@@ -219,10 +224,10 @@ const BOSSES = {
 
   // Floor 3 — rockets, flames, a very angular truck.
   elon: {
-    hp: 1250, speed: 130, dist: 350, rest: 0.9, phaseAt: [0.5],
+    hp: 950, speed: 130, dist: 350, rest: 0.9, phaseAt: [0.5],
     look: {
-      top: '#16181d', bottom: '#16181d', skin: '#eec3a2', hair: '#3e2f25', hairStyle: 'side', smile: true,
-      logo(c) { c.strokeStyle = '#eceff1'; c.lineWidth = 1.6; seg(c, -4, -31, 4, -21); seg(c, 4, -31, -4, -21); },
+      top: '#2d2f3a', bottom: '#2d2f3a', skin: '#eec3a2', hair: '#3e2f25', hairStyle: 'side', smile: true,
+      logo(c) { c.strokeStyle = '#eceff1'; c.lineWidth = 1.8; seg(c, -4, -31, 4, -21); seg(c, 4, -31, -4, -21); ink(c); },
     },
     onPhase(b) { say(b, T('q_el_p2'), 2.4); banner(T('el_hardcore'), '', 1.6, '#ff7043'); Sfx.play('boss'); },
     tick(b, dt) {
@@ -231,13 +236,13 @@ const BOSSES = {
       b.face = Math.cos(b.data.ca) >= 0 ? 1 : -1;
       part(b.x, b.y, 6, { vx: rand(-60, 60), vy: rand(-60, 60), vz: rand(20, 120), life: 0.4, color: '#b0bec5', size: 5, grav: 100 });
       const desk = inObstacle(b.x, b.y, 14);
-      if (desk) {
+      if (desk && desk.desk) {
         G.obstacles.splice(G.obstacles.indexOf(desk), 1);
         burst(desk.x + desk.w / 2, desk.y + desk.d / 2, 30, 30, ['#cfd8dc', '#90a4ae', '#4fc3f7', '#263238'], { sp: 320, up: 380, life: 1 });
         View.shake = 10; Sfx.play('boom');
       }
-      if (b.x < b.r + 2 || b.x > ARENA.w - b.r - 2 || b.y < b.r + 8 || b.y > ARENA.h - b.r - 2) {
-        pushOut(b, true);
+      if (b.x < HOME.x + b.r || b.x > HOME.x + HOME.w - b.r || b.y < HOME.y + b.r || b.y > HOME.y + HOME.h - b.r) {
+        b.x = clamp(b.x, HOME.x + b.r, HOME.x + HOME.w - b.r); b.y = clamp(b.y, HOME.y + b.r, HOME.y + HOME.h - b.r);
         View.shake = 16; Sfx.play('boom');
         burst(b.x, b.y, 20, 24, ['#b0bec5', '#eceff1', '#ffca28'], { sp: 260, up: 300 });
         if (--b.data.charges > 0) { b.mode = 'still'; after(b, 0.35, b.data.next); }
@@ -254,7 +259,6 @@ const BOSSES = {
             zone(cx(p.x + p.vx * 0.35 + rand(-50, 50)), cy(p.y + p.vy * 0.35 + rand(-50, 50)), 78, 0.85, { look: 'rocket', dmg: 20 });
           });
         }
-        layoff(randi(300, 700));
         return 1.1 + n * 0.26;
       }],
       [function flame(b) {
@@ -295,20 +299,20 @@ const BOSSES = {
 
   // Floor 4 — fired by the board, back five days later.
   sam: {
-    hp: 800, speed: 125, dist: 330, rest: 0.9,
+    hp: 600, speed: 125, dist: 330, rest: 0.9,
     look: { top: '#8d9aa5', bottom: '#37474f', skin: '#f1cdb0', hair: '#5d4a3a', hairStyle: 'messy' },
     onDeath(b) {
       if (b.data.revived) return false;
       b.data.revived = true;
       b.gone = true; b.inv = true; b.hp = 1; b.q = []; b.busy = 99; b.shield = null; b.mode = 'orbit';
       clearHazards();
-      dust(b.x, b.y, 80, ['#8d9aa5', '#f1cdb0', '#fff']);
+      poof(b.x, b.y);
       Sfx.play('snap');
       banner(T('sam_fired'), T('sam_fired_sub'), 2.4, '#ffd54f');
       after(b, 2.6, () => banner(T('sam_days'), '', 1.6, '#b0bec5'));
       after(b, 4.4, () => {
-        b.gone = false; b.inv = false; b.maxhp = 620; b.hp = 620; b.phase = 2; b.busy = 0; b.cool = 1;
-        b.x = ARENA.w / 2; b.y = 150;
+        b.gone = false; b.inv = false; b.maxhp = 450; b.hp = 450; b.phase = 2; b.busy = 0; b.cool = 1;
+        b.x = b.home.x + b.home.w / 2; b.y = b.home.y + 150;
         say(b, T('q_sam_back'), 2.6);
         banner(T('sam_back'), T('sam_back_sub'), 2, '#69f0ae');
         burst(b.x, b.y, 40, 30, ['#69f0ae', '#fff']);
@@ -331,7 +335,6 @@ const BOSSES = {
       [function agents(b) {
         say(b, T('q_sam_agents'));
         summonAround(b, 'agent', b.phase > 1 ? 6 : 4);
-        layoff(randi(300, 800));
         return 1.3;
       }],
       [function raise(b) {
@@ -364,7 +367,7 @@ const BOSSES = {
 
   // Floor 5 — the safety-first final boss, escalating one ASL at a time.
   dario: {
-    hp: 1350, speed: 105, dist: 340, rest: 0.9, phaseAt: [0.68, 0.36],
+    hp: 1100, speed: 105, dist: 340, rest: 0.9, phaseAt: [0.68, 0.36],
     look: { top: '#3f6fb5', shirt: '#e3f2fd', bottom: '#2b2f3a', skin: '#efc7a6', hair: '#3b2a20', hairStyle: 'curly', glasses: '#263238', smile: true },
     init(b) { b.orbs = 3; b.orbA = 0; },
     tick(b, dt) { b.orbA += dt * 1.7; },
@@ -419,13 +422,12 @@ const BOSSES = {
           for (let i = 0; i < 5; i++) {
             for (let j = 0; j < 5; j++) {
               const x = ox + i * sp, y = oy + j * sp;
-              if ((i + j) % 2 === par && x > 30 && x < ARENA.w - 30 && y > 30 && y < ARENA.h - 30) zone(x, y, 92, delay, { look: 'grid', dmg: 20 });
+              if ((i + j) % 2 === par && x > HOME.x && x < HOME.x + HOME.w && y > HOME.y && y < HOME.y + HOME.h) zone(x, y, 92, delay, { look: 'grid', dmg: 20 });
             }
           }
         };
         lay(par, 1.25);
         after(b, 1.05, () => lay(1 - par, 1.25));
-        layoff(randi(300, 700));
         return 2.9;
       }, 2],
     ],
