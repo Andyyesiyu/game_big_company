@@ -61,14 +61,14 @@ function ink(c, w = 1.5) { c.strokeStyle = LINE; c.lineWidth = w * 0.7; c.lineJo
 // warm from the upper-left, falling into cool shade at the lower-right. This is what stops
 // characters reading as flat cut-outs.
 const SCRATCH = document.createElement('canvas'), SC = SCRATCH.getContext('2d');
-// 2D quality. 2: everything. 1: fewer pixels, and the soft light only on figures near you and on bosses.
+// 2D quality. 2: full resolution. 1: fewer pixels. At both, the soft light goes only on bosses and figures near you.
 // 0: plain and fast: lowest resolution, no per-figure light, no lighting pass, thinner ground clutter.
-// dpr / sdpr are the caps on the HUD canvas's and the world canvas's pixel ratio at each level.
-const Q2D = { level: 2, dpr: [1, 1.5, 2], sdpr: [1, 1.25, 1.5] };
+// sdpr is the cap on the world canvas's pixel ratio at each level (the HUD has its own canvas and stays sharp).
+const Q2D = { level: 2, sdpr: [1, 1.25, 1.5] };
 function lit(x, y, z, w, h, fn) {
   // The scratch-canvas pass is the dearest thing in the 2D view (a render-target switch per figure), so at lower
   // quality most figures are drawn straight onto the scene instead.
-  if (Q2D.level === 0 || (Q2D.level === 1 && w < 200 && Math.abs(x - G.player.x) + Math.abs(y - G.player.y) > 340)) {
+  if (Q2D.level === 0 || (w < 200 && Math.abs(x - G.player.x) + Math.abs(y - G.player.y) > (Q2D.level === 2 ? 520 : 340))) {
     ctx.save(); ctx.translate(sx(x), sy(y, z)); ctx.scale(View.S, View.S); fn(ctx); ctx.restore();
     return;
   }
@@ -91,6 +91,74 @@ function lit(x, y, z, w, h, fn) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(SCRATCH, 0, 0, W, H, Math.round(sx(x) * dpr - W / 2), Math.round(sy(y, z) * dpr - (H - base)), W, H);
   ctx.restore();
+}
+// ---------- sprite cache ----------
+// Canvas 2D is slow at what this renderer does most: filling thousands of small vector paths a frame. Anything
+// that looks the same from one frame to the next (trees, rocks, buildings, desks, boxes, strips of tall grass)
+// is therefore painted once into its own little canvas and from then on is a single image blit.
+// The painting code is not changed: the "camera" is pointed at the sprite canvas while it runs.
+const SPR = { owners: new Set(), px: 0, max: 18e6, frame: 0, budget: 0 };
+// owner: the object the sprite belongs to; key: changes when it must be repainted; (x, y): its ground point;
+// l r u d: how far the drawing reaches left, right, up and down from that point, in world-sized units.
+function sprite(owner, key, x, y, l, r, u, d, paint, alpha, shear) {
+  const S0 = View.S0, rd = RENDER.k / View.S, k = S0 * rd;
+  let e = owner._spr;
+  if (!e || e.key !== key || e.k !== k) {
+    const w = Math.ceil((l + r) * k) + 2, h = Math.ceil((u + d) * k) + 2;
+    if (SPR.budget <= 0 || w * h > 5e6) return paint(); // not this frame (or too big to keep): draw it the long way
+    SPR.budget--;
+    const cv = e ? e.cv : document.createElement('canvas');
+    if (e) SPR.px -= cv.width * cv.height;
+    cv.width = w; cv.height = h;
+    const sv = [ctx, View.W, View.H, View.cam.x, View.cam.y, View.ox, View.oy, View.S];
+    ctx = cv.getContext('2d'); ctx.setTransform(rd, 0, 0, rd, 0, 0);
+    View.S = S0; View.cam.x = x; View.cam.y = y; View.ox = View.oy = 0; View.W = (l * S0 + 1 / rd) * 2; View.H = (u * S0 + 1 / rd) * 2;
+    RENDER.k = k;
+    try { paint(); } finally { [ctx, View.W, View.H, View.cam.x, View.cam.y, View.ox, View.oy, View.S] = sv; RENDER.k = View.S * rd; }
+    e = owner._spr = { cv, key, k, used: 0 };
+    SPR.px += w * h; SPR.owners.add(owner);
+    if (SPR.px > SPR.max) {
+      // over budget: let go of whatever has gone longest without being drawn
+      const old = [...SPR.owners].sort((a, b) => a._spr.used - b._spr.used);
+      for (const o of old) { if (SPR.px < SPR.max * 0.75 || o === owner) break; SPR.px -= o._spr.cv.width * o._spr.cv.height; o._spr = null; SPR.owners.delete(o); }
+    }
+  }
+  e.used = SPR.frame;
+  const z = View.S / S0, ax = l * S0 + 1 / rd, ay = u * S0 + 1 / rd, cw = e.cv.width / rd, ch = e.cv.height / rd;
+  if (alpha !== undefined) ctx.globalAlpha = alpha;
+  if (shear) { ctx.save(); ctx.translate(sx(x), sy(y)); ctx.transform(z, 0, shear * z, z, 0, 0); ctx.drawImage(e.cv, -ax, -ay, cw, ch); ctx.restore(); }
+  else if (z === 1) ctx.drawImage(e.cv, Math.round((sx(x) - ax) * rd) / rd, Math.round((sy(y) - ay) * rd) / rd, cw, ch); // on the pixel grid: a plain copy
+  else ctx.drawImage(e.cv, sx(x) - ax * z, sy(y) - ay * z, cw * z, ch * z);
+  if (alpha !== undefined) ctx.globalAlpha = 1;
+}
+function clearSprites() { for (const o of SPR.owners) o._spr = null; SPR.owners.clear(); SPR.px = 0; }
+
+// A moving figure kept as an image of its own. It is repainted only when `key` changes, which callers arrange to
+// be about fifteen times a second (limbs step at that rate; the figure itself still glides, because the image is
+// placed afresh every frame). The soft light is laid over it right there in its own canvas, so every figure gets
+// it and nobody needs the scratch-canvas pass.
+function figure(owner, key, x, y, z, w, h, fn) {
+  const S = View.S, rd = RENDER.k / S, k = View.S0 * rd, W = Math.ceil(w * k), H = Math.ceil(h * k), base = 16 * k;
+  let e = owner._fig;
+  if (!e) { const cv = document.createElement('canvas'); e = owner._fig = { cv, c: cv.getContext('2d'), key: null, k: 0 }; }
+  if (e.key !== key || e.k !== k) {
+    const c = e.c;
+    if (e.cv.width !== W || e.cv.height !== H) { e.cv.width = W; e.cv.height = H; }
+    c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+    c.clearRect(0, 0, W, H);
+    c.setTransform(k, 0, 0, k, W / 2, H - base);
+    fn(c);
+    if (Q2D.level > 0) {
+      c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = 'source-atop'; c.globalAlpha = 1;
+      const g = c.createLinearGradient(W * 0.15, 0, W * 0.85, H);
+      g.addColorStop(0, 'rgba(255,242,205,0.34)'); g.addColorStop(0.42, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(12,26,48,0.46)');
+      c.fillStyle = g; c.fillRect(0, 0, W, H);
+      c.globalCompositeOperation = 'source-over';
+    }
+    e.key = key; e.k = k;
+  }
+  const z0 = S / View.S0;
+  ctx.drawImage(e.cv, sx(x) - (W / 2 / rd) * z0, sy(y, z) - ((H - base) / rd) * z0, (W / rd) * z0, (H / rd) * z0);
 }
 function groundEllipse(x, y, r) {
   ctx.beginPath();
@@ -527,7 +595,10 @@ function groundTile(M, i, j, k) {
   const c = cv.getContext('2d'), w = TILE / k, h = TILE / (k * YK), x0 = i * w, y0 = j * h;
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, TILE, TILE);
   c.setTransform(k, 0, 0, k * YK, -i * TILE, -j * TILE);
-  paintGround(c, M, (x, y, r) => x + r > x0 && x - r < x0 + w && y + r > y0 && y - r < y0 + h);
+  const vis = (x, y, r) => x + r > x0 && x - r < x0 + w && y + r > y0 && y - r < y0 + h;
+  paintGround(c, M, vis);
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  for (const q of M.tufts) if (vis(q.x, q.y, 24)) paintTuft(c, q, q.x * k - i * TILE, q.y * k * YK - j * TILE, k);
   t = { cv, used: GROUND.frame };
   GROUND.tiles.set(key, t);
   return t;
@@ -540,7 +611,9 @@ function drawTerrain(M, t) {
   const vis = (x, y, r) => x + r > a.x && x - r < b.x && y + r > a.y && y - r < b.y;
   // tiles are painted at the resting zoom and the canvas's pixel ratio, then scaled by whatever the zoom is now
   const k = View.S0 * (RENDER.k / S);
+  if (GROUND.map !== M) clearSprites();
   if (GROUND.map !== M || Math.abs(GROUND.k - k) > 1e-6) { GROUND.tiles.clear(); GROUND.map = M; GROUND.k = k; }
+  SPR.frame++; SPR.budget = 10;
   GROUND.frame++; GROUND.budget = 6;
   const tw = TILE / k, th = TILE / (k * YK), ds = tw * S;
   const i0 = Math.max(Math.floor(a.x / tw), Math.floor(-120 / tw)), i1 = Math.min(Math.floor(b.x / tw), Math.floor((ARENA.w + 120) / tw));
@@ -574,53 +647,55 @@ function drawTerrain(M, t) {
     }
     c.globalAlpha = 1;
   });
-  // short tufts, flowers and pebbles: tiny billboards that never need depth sorting
-  const thin = Q2D.level === 0;
-  for (let n = 0; n < M.tufts.length; n += thin ? 2 : 1) {
-    const q = M.tufts[n];
-    if (!vis(q.x, q.y, 20)) continue;
-    const px = sx(q.x), py = sy(q.y), w = Math.sin(t * 2 + q.x * 0.02 + q.y * 0.013) * 2.2 * S;
-    if (q.k === 0) {
-      ctx.fillStyle = q.c;
-      ctx.beginPath();
-      ctx.moveTo(px - 6 * S, py); ctx.lineTo(px - 4 * S + w, py - 11 * S); ctx.lineTo(px - 1 * S, py);
-      ctx.lineTo(px + w, py - 15 * S); ctx.lineTo(px + 2 * S, py); ctx.lineTo(px + 5 * S + w, py - 10 * S); ctx.lineTo(px + 6 * S, py);
-      ctx.fill();
-    } else if (q.k === 1) {
-      ctx.strokeStyle = '#3d7a34'; ctx.lineWidth = 1.5 * S;
-      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + w, py - 10 * S); ctx.stroke();
-      ctx.fillStyle = q.c; ctx.beginPath(); ctx.arc(px + w, py - 11 * S, 3.6 * S, 0, TAU); ctx.fill();
-      ctx.fillStyle = '#ffe36e'; ctx.beginPath(); ctx.arc(px + w, py - 11 * S, 1.4 * S, 0, TAU); ctx.fill();
-    } else {
-      ctx.fillStyle = '#8d8f86'; ctx.beginPath(); ctx.ellipse(px, py, 5 * S, 3 * S, 0, 0, TAU); ctx.fill();
-    }
+}
+// Short tufts, flowers and pebbles. They stand upright (they are not squashed like the ground), and are painted
+// into the ground tiles: a few hundred tiny paths a frame was too much to pay for a little sway.
+function paintTuft(c, q, px, py, S) {
+  if (q.k === 0) {
+    c.fillStyle = q.c;
+    c.beginPath();
+    c.moveTo(px - 6 * S, py); c.lineTo(px - 4 * S, py - 11 * S); c.lineTo(px - 1 * S, py);
+    c.lineTo(px, py - 15 * S); c.lineTo(px + 2 * S, py); c.lineTo(px + 5 * S, py - 10 * S); c.lineTo(px + 6 * S, py);
+    c.fill();
+  } else if (q.k === 1) {
+    c.strokeStyle = '#3d7a34'; c.lineWidth = 1.5 * S;
+    c.beginPath(); c.moveTo(px, py); c.lineTo(px, py - 10 * S); c.stroke();
+    c.fillStyle = q.c; c.beginPath(); c.arc(px, py - 11 * S, 3.6 * S, 0, TAU); c.fill();
+    c.fillStyle = '#ffe36e'; c.beginPath(); c.arc(px, py - 11 * S, 1.4 * S, 0, TAU); c.fill();
+  } else {
+    c.fillStyle = '#8d8f86'; c.beginPath(); c.ellipse(px, py, 5 * S, 3 * S, 0, 0, TAU); c.fill();
   }
 }
 
 // One horizontal strip of tall grass; several strips per patch get depth-sorted with the actors.
 function drawGrassRow(row, t) {
-  const S = View.S, py = sy(row.y);
-  for (const bl of row.blades) {
-    const px = sx(row.x + bl.dx), w = Math.sin(t * 2.2 + (row.x + bl.dx) * 0.03) * 3 * S;
-    ctx.fillStyle = bl.c;
-    ctx.beginPath();
-    ctx.moveTo(px - 4 * S, py); ctx.lineTo(px + w, py - bl.h * S); ctx.lineTo(px + 4 * S, py);
-    ctx.fill();
-  }
+  if (!row.ext) { let l = 0, r = 0, h = 0; for (const bl of row.blades) { l = Math.max(l, -bl.dx); r = Math.max(r, bl.dx); h = Math.max(h, bl.h); } row.ext = [l + 8, r + 8, h + 4]; }
+  // one image per strip; the whole strip leans with the wind instead of each blade
+  sprite(row, 'g', row.x, row.y, row.ext[0], row.ext[1], row.ext[2], 3, () => {
+    const S = View.S, py = sy(row.y);
+    for (const bl of row.blades) {
+      const px = sx(row.x + bl.dx);
+      ctx.fillStyle = bl.c;
+      ctx.beginPath();
+      ctx.moveTo(px - 4 * S, py); ctx.lineTo(px, py - bl.h * S); ctx.lineTo(px + 4 * S, py);
+      ctx.fill();
+    }
+  }, undefined, Q2D.level === 2 ? -Math.sin(t * 2.2 + row.x * 0.03) * 0.07 : 0);
 }
 
 function drawTree(o, t, fade) {
   shadow(o.x, o.y, 8, 0.24, 54);
   const ch = 54 + o.cr * 0.55;
   ctx.fillStyle = 'rgba(20,34,60,0.26)'; groundEllipse(o.x + SUN.x * ch, o.y + SUN.y * ch, o.cr * 1.02); ctx.fill();
-  at(o.x, o.y, 0, (c) => {
-    const sway = Math.sin(t * 1.3 + o.x * 0.01) * 2.5, R = o.cr, cy = -48 - R * 0.55;
+  // the tree itself never changes: one image, leaning a touch with the wind, see-through when you are behind it
+  const R0 = o.cr;
+  sprite(o, 't', o.x, o.y, R0 * 1.25 + 16, R0 * 1.25 + 16, 56 + R0 * 1.75, 8, () => at(o.x, o.y, 0, (c) => {
+    const sway = 0, R = o.cr, cy = -48 - R * 0.55;
     // trunk: bark lit from the left, with a root flare
     const tg = c.createLinearGradient(-9, 0, 10, 0);
     tg.addColorStop(0, '#9a7450'); tg.addColorStop(0.45, '#6b4a31'); tg.addColorStop(1, '#33231a');
     c.fillStyle = tg;
     poly(c, [-13, 1, -6, -10, -5, -54, 5, -54, 7, -10, 14, 1]);
-    if (fade) c.globalAlpha = 0.36;
     // canopy: a dark mass, then leaf clusters each catching the light on its upper-left
     c.fillStyle = o.pal[0];
     circ(c, sway * 0.5, cy + R * 0.12, R * 0.82);
@@ -631,12 +706,12 @@ function drawTree(o, t, fade) {
       c.fillStyle = g;
       circ(c, gx, gy, r);
     }
-  });
+  }), fade ? 0.4 : undefined, Q2D.level === 2 ? -Math.sin(t * 1.3 + o.x * 0.01) * 0.022 : 0);
 }
 
 function drawRock(o) {
   shadow(o.x, o.y, o.r * 0.95, 0.26, o.r * 1.1);
-  at(o.x, o.y, 0, (c) => {
+  sprite(o, 'r', o.x, o.y, o.r * 1.1 + 3, o.r * 1.1 + 3, o.r * 1.4 + 3, o.r * 0.3 + 3, () => at(o.x, o.y, 0, (c) => {
     const r = o.r, g = c.createLinearGradient(-r, -r * 1.2, r, r * 0.2);
     g.addColorStop(0, '#c4c2b8'); g.addColorStop(0.5, '#8b8a84'); g.addColorStop(1, '#4b4a4c');
     c.fillStyle = g;
@@ -646,13 +721,16 @@ function drawRock(o) {
     c.fillStyle = 'rgba(84,140,62,0.78)';
     c.beginPath(); c.ellipse(-r * 0.05, -r * 1.02, r * 0.5, r * 0.2, -0.15, 0, TAU); c.fill();
     c.beginPath(); c.ellipse(-r * 0.62, -r * 0.62, r * 0.24, r * 0.14, -0.7, 0, TAU); c.fill();
-  });
+  }));
 }
 
 function drawDesk(ob, th) {
+  boxShadow(ob, 0.2);
+  sprite(ob, 'd', ob.x, ob.y, 4, ob.w + 4, ob.h + 46, ob.d * YK + 5, () => deskBody(ob, th));
+}
+function deskBody(ob, th) {
   const S = View.S, x0 = sx(ob.x), w = ob.w * S;
   const yTopBack = sy(ob.y, ob.h), yTopFront = sy(ob.y + ob.d, ob.h), yBot = sy(ob.y + ob.d, 0);
-  boxShadow(ob, 0.2);
   ctx.strokeStyle = LINE; ctx.lineWidth = 2 * S; ctx.lineJoin = 'round';
   ctx.fillStyle = '#bfae90';
   ctx.beginPath(); ctx.rect(x0, yTopFront, w, yBot - yTopFront); ctx.fill(); ctx.stroke();
@@ -671,9 +749,24 @@ function drawDesk(ob, th) {
 }
 
 function drawBuilding(ob, th, t, sign) {
+  boxShadow(ob, 0.24);
+  // the building is one image, repainted only when its windows light up or the language changes
+  sprite(ob, (G.day > 0.45 ? 'n' : 'd') + (sign || ''), ob.x, ob.y, 12, ob.w + 12, ob.h + 8, ob.d * YK + 6, () => buildingBody(ob, th, sign));
+  if (Q2D.level < 2) return;
+  // the lanterns' glow breathes, so it stays live (full quality only)
+  const S = View.S, x0 = sx(ob.x), w = ob.w * S, yBot = sy(ob.y + ob.d, 0), fh = yBot - sy(ob.y + ob.d, ob.h);
+  const glow = 0.07 + G.day * 0.2 + Math.sin(t * 3 + ob.x) * 0.02;
+  ctx.globalCompositeOperation = 'lighter';
+  for (const lx of [x0 + 14 * S, x0 + w - 14 * S]) {
+    const ly = yBot - fh * 0.52, lg = ctx.createRadialGradient(lx, ly, 0, lx, ly, 95 * S);
+    lg.addColorStop(0, `rgba(255,180,80,${glow})`); lg.addColorStop(1, 'rgba(255,180,80,0)');
+    ctx.fillStyle = lg; ctx.fillRect(lx - 95 * S, ly - 95 * S, 190 * S, 190 * S);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+function buildingBody(ob, th, sign) {
   const S = View.S, x0 = sx(ob.x), w = ob.w * S;
   const yRoofBack = sy(ob.y, ob.h), yRoofFront = sy(ob.y + ob.d, ob.h), yBot = sy(ob.y + ob.d, 0), fh = yBot - yRoofFront;
-  boxShadow(ob, 0.24);
   ctx.strokeStyle = LINE; ctx.lineWidth = 2.6 * S; ctx.lineJoin = 'round';
   ctx.fillStyle = th.wall;
   ctx.beginPath(); ctx.rect(x0, yRoofFront, w, fh); ctx.fill(); ctx.stroke();
@@ -708,17 +801,11 @@ function drawBuilding(ob, th, t, sign) {
   for (let px = x0 + 26 * S; px < x0 + w - 4 * S; px += 26 * S) { ctx.moveTo(px, yRoofFront + 9 * S); ctx.lineTo(px, yBot); }
   ctx.stroke();
   // lanterns either side of the front
-  const glow = 0.07 + G.day * 0.2 + Math.sin(t * 3 + ob.x) * 0.02;
   for (const lx of [x0 + 14 * S, x0 + w - 14 * S]) {
     const ly = yBot - fh * 0.52;
     ctx.fillStyle = '#5a3d22'; ctx.fillRect(lx - 1.5 * S, ly - 16 * S, 3 * S, 10 * S);
     ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.ellipse(lx, ly, 6.5 * S, 8.5 * S, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = '#fff1c2'; ctx.beginPath(); ctx.ellipse(lx, ly, 3 * S, 4.5 * S, 0, 0, TAU); ctx.fill();
-    const lg = ctx.createRadialGradient(lx, ly, 0, lx, ly, 95 * S);
-    lg.addColorStop(0, `rgba(255,180,80,${glow})`); lg.addColorStop(1, 'rgba(255,180,80,0)');
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = lg; ctx.fillRect(lx - 95 * S, ly - 95 * S, 190 * S, 190 * S);
-    ctx.globalCompositeOperation = 'source-over';
   }
   if (sign) {
     ctx.save();
@@ -727,7 +814,7 @@ function drawBuilding(ob, th, t, sign) {
     const ty = yRoofFront + fh * 0.19, tw = ctx.measureText(sign).width + 28 * S;
     ctx.fillStyle = INK;
     ctx.beginPath(); ctx.roundRect(x0 + w / 2 - tw / 2, ty - 17 * S, tw, 34 * S, 8 * S); ctx.fill();
-    ctx.fillStyle = Math.sin(t * 13) > -0.95 ? th.neon : '#888';
+    ctx.fillStyle = th.neon;
     ctx.fillText(sign, x0 + w / 2, ty + 1 * S);
     ctx.restore();
   }
@@ -735,7 +822,7 @@ function drawBuilding(ob, th, t, sign) {
 
 function drawContainer(k, t) {
   shadow(k.x + 3, k.y + 1, 20, 0.2);
-  at(k.x, k.y, 0, (c) => {
+  sprite(k, k.opened ? 'o' : 'c', k.x, k.y, 26, 28, 52, 6, () => at(k.x, k.y, 0, (c) => {
     ink(c, 1.8);
     if (k.kind === 'crate') {
       c.fillStyle = k.opened ? '#a88962' : '#d9a868'; rrS(c, -17, -24, 34, 24, 2);
@@ -755,7 +842,7 @@ function drawContainer(k, t) {
       c.fillStyle = k.opened ? '#2a2438' : '#ffcf4a'; circS(c, 0, -17, 8);
       if (!k.opened) { c.fillStyle = INK; circ(c, 0, -17, 2.2); seg(c, 0, -17, 5, -22); }
     }
-  });
+  }));
   if (!k.opened && k.prog > 0) {
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 5 * View.S; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.arc(sx(k.x), sy(k.y, 70), 13 * View.S, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(k.prog / k.need, 0, 1)); ctx.stroke();

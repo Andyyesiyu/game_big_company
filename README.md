@@ -158,8 +158,14 @@ The HUD, name tags and damage numbers are a 2D canvas layered on top.
 lighting pass in `js/post.js`) is still there. It has three quality levels of its own (canvas
 resolution, whether figures get the soft per-figure light, the lighting pass and the air
 effects) that the game moves between to hold the frame rate, starting at the plainest one
-when the browser has no graphics acceleration. The ground is painted once into tiles and
-blitted, and while 2D is showing the 3D world and the model library are not built or
+when the browser has no graphics acceleration. Canvas 2D is slow at filling thousands of small vector
+paths a frame, with or without a graphics card, so almost nothing is drawn that way more
+than once: the ground (with its tufts and flowers) is painted into tiles; trees, rocks,
+buildings, desks, boxes and strips of tall grass are each painted into a sprite and
+blitted; enemies and sidekicks are images repainted about fifteen times a second; the
+skill buttons and the minimap's map are cached. A typical frame went from about 2,000
+path fills and 270 gradients to about 500 and 30. The world has its own canvas at a
+lower pixel ratio than the HUD's, so the HUD stays sharp. While 2D is showing the 3D world and the model library are not built or
 decoded at all. The game steps down to it by itself if the
 3D view can't hold a frame rate in the first few seconds, and you can switch either way
 with the Graphics button in the menu.

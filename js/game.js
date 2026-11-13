@@ -408,7 +408,9 @@ function drawEnemy(e) {
   ctx.globalAlpha = 1 - rise;
   // struck: the figure judders in place for a few frames
   const jit = e.hitAt !== undefined ? Math.max(0, 1 - (G.t - e.hitAt) / 0.2) : 0;
-  lit(e.x + Math.sin(G.t * 95) * 5 * jit, e.y, e.z + rise * 50, 150, 150, (c) => enemyFigure(c, e));
+  // (the key: a new image fifteen times a second, and at once whenever what they are doing or holding changes)
+  const fk = Math.floor(e.t * 15) + (e.flash > 0 ? 'f' : '') + (e.stun > 0 ? 's' : '') + (e.asleep ? 'z' : '') + (e.moving ? 'm' : '') + e.face + (e.type === 'rival' ? e.w + Math.round((e.wind > 0 ? e.windA : e.aim) * 5) + (e.wind > 0 ? 'w' : '') : '');
+  figure(e, fk, e.x + Math.sin(G.t * 95) * 5 * jit, e.y, e.z + rise * 50, 150, 150, (c) => enemyFigure(c, e));
   ctx.globalAlpha = 1;
   if (e.type === 'rival') {
     const y = sy(e.y, 82);
@@ -443,7 +445,7 @@ function drawBullet(b) {
 function drawPet(q) {
   shadow(q.x, q.y, 12);
   ctx.strokeStyle = '#5df09a'; ctx.lineWidth = 2; groundEllipse(q.x, q.y, 17); ctx.stroke();
-  lit(q.x, q.y, q.type === 'doubao' ? Math.abs(Math.sin(q.t * 5)) * 6 : 0, 90, 90, (c) => {
+  figure(q, Math.floor(q.t * 15) + (q.moving ? 'm' : '') + q.face, q.x, q.y, q.type === 'doubao' ? Math.abs(Math.sin(q.t * 5)) * 6 : 0, 90, 90, (c) => {
     if (q.type === 'doubao') drawDoubao(c, q.t, q.face); else if (q.type === 'crab') drawCrab(c, q.moving ? q.t : 0, q.face); else drawGptBot(c, q.t, q.face);
   });
 }
@@ -471,9 +473,12 @@ function render() {
   // with the lighting pass on, the world goes to an offscreen canvas and through the shader
   const fx = Post.ok && Settings.fx && Q2D.level > 0;
   if (glCv.style.display !== (fx ? 'block' : 'none')) glCv.style.display = fx ? 'block' : 'none';
-  const rd = fx ? SDPR : DPR;
+  if (sceneCv.style.display !== (fx ? 'none' : 'block')) sceneCv.style.display = fx ? 'none' : 'block';
+  // The world is drawn on its own canvas, at its own (lower) pixel ratio; the canvas above it only ever holds the
+  // HUD, which therefore stays sharp however plain the world is being drawn.
+  const rd = SDPR;
   RENDER.k = S * rd;
-  ctx = fx ? sctx : hctx;
+  ctx = sctx;
   ctx.setTransform(rd, 0, 0, rd, 0, 0);
   ctx.globalAlpha = 1;
   // shake is a quick smooth wobble rather than per-frame noise; the camera also leans a little with each blow
@@ -590,15 +595,14 @@ function render() {
     ctx.fillStyle = `rgba(${G.flash.color},${G.flash.a * (G.flash.t / G.flash.max)})`;
     ctx.fillRect(0, 0, View.W, View.H);
   }
-  if (fx) {
-    Post.draw(sceneCv, View.cam.x - View.ox / S, View.cam.y - View.oy / (S * YK), S * SDPR, YK, t, G.day, clamp(G.slowT * 2, 0, 1));
-    ctx = hctx;
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.clearRect(0, 0, View.W, View.H);
-  } else {
+  if (fx) Post.draw(sceneCv, View.cam.x - View.ox / S, View.cam.y - View.oy / (S * YK), S * SDPR, YK, t, G.day, clamp(G.slowT * 2, 0, 1));
+  else {
     if (G.slowT > 0) { ctx.fillStyle = `rgba(90,150,255,${0.22 * clamp(G.slowT * 2, 0, 1)})`; ctx.fillRect(0, 0, View.W, View.H); }
     if (air) ctx.drawImage(vignette(), 0, 0, View.W, View.H);
   }
+  ctx = hctx;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, View.W, View.H);
 
   if (G.cine) drawCine(); else if (G.state === 'play' || G.state === 'paused' || G.state === 'over') drawHUD();
 }
@@ -654,14 +658,18 @@ function drawMinimap(x, y, s) {
   const k = s / ARENA.w, z = G.zone, p = G.player;
   ctx.save();
   ctx.beginPath(); ctx.roundRect(x, y, s, s, 12); ctx.clip();
-  ctx.fillStyle = '#84c95a'; ctx.fillRect(x, y, s, s);
-  ctx.strokeStyle = '#eadba6'; ctx.lineWidth = 2; ctx.lineCap = 'round';
-  for (const pa of G.map.paths) { ctx.beginPath(); for (const q of pa) ctx.lineTo(x + q[0] * k, y + q[1] * k); ctx.stroke(); }
-  for (const o of G.map.ponds) { ctx.fillStyle = '#4aa8e6'; ctx.beginPath(); ctx.arc(x + o.x * k, y + o.y * k, o.r * k, 0, TAU); ctx.fill(); }
-  for (const pl of G.map.plazas) {
-    ctx.fillStyle = pl.minor ? 'rgba(255,255,255,0.5)' : THEMES[pl.theme].wall;
-    ctx.fillRect(x + pl.x * k, y + pl.y * k, pl.w * k, pl.h * k);
+  // the map under the markers never changes: painted once per match and size, then copied
+  const M = G.map, mk = Math.round(s * DPR);
+  if (!M._mini || M._mini.width !== mk) {
+    const cv = (M._mini = document.createElement('canvas')), c = cv.getContext('2d'), q0 = mk / ARENA.w;
+    cv.width = cv.height = mk;
+    c.fillStyle = '#84c95a'; c.fillRect(0, 0, mk, mk);
+    c.strokeStyle = '#eadba6'; c.lineWidth = 2 * DPR; c.lineCap = 'round';
+    for (const pa of M.paths) { c.beginPath(); for (const q of pa) c.lineTo(q[0] * q0, q[1] * q0); c.stroke(); }
+    for (const o of M.ponds) { c.fillStyle = '#4aa8e6'; c.beginPath(); c.arc(o.x * q0, o.y * q0, o.r * q0, 0, TAU); c.fill(); }
+    for (const pl of M.plazas) { c.fillStyle = pl.minor ? 'rgba(255,255,255,0.5)' : THEMES[pl.theme].wall; c.fillRect(pl.x * q0, pl.y * q0, pl.w * q0, pl.h * q0); }
   }
+  ctx.drawImage(M._mini, x, y, s, s);
   // storm
   ctx.beginPath(); ctx.rect(x, y, s, s); ctx.arc(x + z.x * k, y + z.y * k, Math.max(z.r * k, 0.1), 0, TAU, true);
   ctx.fillStyle = 'rgba(140,50,190,0.55)'; ctx.fill('evenodd');
@@ -914,6 +922,21 @@ function drawSkillIcon(c, id) {
 }
 
 // ---------- the look of the HUD: things you could touch ----------
+// A piece of the HUD painted once and kept: w x h, with (0, 0) at its centre while painting.
+const HUDC = new Map();
+function hudSprite(key, w, h, paint) {
+  key += '|' + DPR;
+  let cv = HUDC.get(key);
+  if (cv) return cv;
+  if (HUDC.size > 90) HUDC.clear();
+  cv = document.createElement('canvas');
+  cv.width = Math.ceil(w * DPR); cv.height = Math.ceil(h * DPR);
+  const prev = ctx;
+  ctx = cv.getContext('2d'); ctx.setTransform(DPR, 0, 0, DPR, (w / 2) * DPR, (h / 2) * DPR);
+  try { paint(); } finally { ctx = prev; }
+  HUDC.set(key, cv);
+  return cv;
+}
 // A dark metal plate that gauges and dials sit on.
 function plate(x, y, w, h, r) {
   ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.roundRect(x, y + 4, w, h, r); ctx.fill();
@@ -1035,9 +1058,15 @@ function drawSkills(u) {
     const ready = cd <= 0 && !short && (b.id !== 'tea' || p.tea > 0), urge = b.id === 'tea' && low && p.tea > 0;
     const r = b.r * (urge ? 1.08 + beat * 0.12 : 1);
     if (urge) { ctx.save(); ctx.shadowColor = '#ff3b55'; ctx.shadowBlur = 16 + beat * 22; ctx.fillStyle = '#ff3b55'; ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, TAU); ctx.fill(); ctx.restore(); }
-    knob(b.x, b.y, r, ready ? FACE[b.id] : '#4a4560', Input.held(b.id));
-    ctx.save(); ctx.translate(b.x, b.y); ctx.scale(r / 29, r / 29); ctx.globalAlpha = ready ? 1 : 0.5; drawSkillIcon(ctx, b.id); ctx.restore();
-    if (ready) gloss(b.x, b.y, r * 0.82);
+    // a button looks the same until its state changes, so it is painted once per state and copied
+    const down = Input.held(b.id), box = r * 2.5;
+    const face = () => {
+      knob(0, 0, r, ready ? FACE[b.id] : '#4a4560', down);
+      ctx.save(); ctx.scale(r / 29, r / 29); ctx.globalAlpha = ready ? 1 : 0.5; drawSkillIcon(ctx, b.id); ctx.restore();
+      if (ready) gloss(0, 0, r * 0.82);
+    };
+    if (urge) { ctx.save(); ctx.translate(b.x, b.y); face(); ctx.restore(); }
+    else ctx.drawImage(hudSprite(b.id + (ready ? 1 : 0) + (down ? 1 : 0) + p.weapon + Math.round(r * 8), box, box, face), b.x - box / 2, b.y - box / 2, box, box);
     if (cd > 0) {
       ctx.fillStyle = 'rgba(30,24,44,0.66)';
       ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.arc(b.x, b.y, r * 0.82, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(cd / max, 0, 1)); ctx.closePath(); ctx.fill();
@@ -1200,14 +1229,14 @@ function onAction(act, el) {
 
 // ---------- boot ----------
 function resize() {
-  // in 3D this canvas only carries the HUD, so it stays sharp; in 2D it follows the quality level
-  DPR = Math.min(window.devicePixelRatio || 1, R3.on ? 2 : Q2D.dpr[Q2D.level]);
+  // this canvas only carries the HUD, so it stays sharp; the 2D world's own canvas follows the quality level
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
   View.W = innerWidth; View.H = innerHeight;
   // notches and home bars: the HUD keeps clear of them
   const cs = getComputedStyle(document.getElementById('safe')), px = (v) => parseFloat(v) || 0;
   View.safe = { t: px(cs.paddingTop), r: px(cs.paddingRight), b: px(cs.paddingBottom), l: px(cs.paddingLeft) };
   UI.fit();
-  SDPR = Math.min(DPR, Q2D.sdpr[Q2D.level]);
+  SDPR = Math.min(window.devicePixelRatio || 1, Q2D.sdpr[Q2D.level]);
   canvas.width = Math.round(View.W * DPR); canvas.height = Math.round(View.H * DPR);
   for (const c of [sceneCv, glCv]) { c.width = Math.round(View.W * SDPR); c.height = Math.round(View.H * SDPR); }
   R3.resize(View.W, View.H, DPR);
@@ -1286,6 +1315,7 @@ function frame(ts) {
   if (R3.on) {
     // 3D: Three.js draws the world; this canvas only carries the HUD and the labels pinned to things
     if (glCv.style.display !== 'none') glCv.style.display = 'none';
+    if (sceneCv.style.display !== 'none') sceneCv.style.display = 'none';
     View.S = View.S0;
     R3.frame(dt);
     ctx = hctx;
@@ -1305,7 +1335,7 @@ function boot() {
   Bank.load();
   Settings.load();
   hctx = ctx;
-  sceneCv = document.createElement('canvas');
+  sceneCv = document.getElementById('c2');
   sctx = sceneCv.getContext('2d');
   glCv = document.getElementById('gl');
   Post.init(glCv);
