@@ -502,8 +502,10 @@ function hitTarget(t, dmg, o) {
   burst(t.x, t.y, hz, big ? 10 : 5, ['#fff', '#ffe08a', '#ffb347'], { sp: 300, up: 240, life: 0.4, size: 5 });
   if (big) { ring(t.x, t.y, 56, '#fff', 0.2); G.flash = { color: '255,255,255', t: 0.07, max: 0.07, a: 0.14 }; }
   // freeze, then shove the camera along the blow and punch the zoom
-  G.hitstop = Math.max(G.hitstop, F.stop[o.heavy ? 2 : crit ? 1 : 0]);
-  if (o.heavy && F.impact) G.impactT = Math.max(G.impactT || 0, F.impact); // a breath of slow motion after the freeze
+  // The freeze holds the fighters only: sparks, numbers and the camera keep moving through it (see frame()), so it
+  // reads as weight rather than as a dropped frame. Hits that come in a burst (a dash through a crowd) freeze less.
+  G.hitstop = Math.max(G.hitstop, F.stop[o.quick ? 0 : o.heavy ? 2 : crit ? 1 : 0]);
+  if (o.fin && F.impact) G.impactT = Math.max(G.impactT || 0, F.impact); // only a finishing blow earns the beat of slow motion
   View.kx += Math.cos(a) * (big ? 13 : 4) * F.kick; View.ky += Math.sin(a) * YK * (big ? 13 : 4) * F.kick;
   View.zk = Math.max(View.zk, (big ? 0.05 : 0.014) * F.zoom);
   View.shake = Math.max(View.shake, (o.heavy ? 8 : crit ? 5 : F.lightShake) * F.shake);
@@ -534,9 +536,9 @@ function hitTarget(t, dmg, o) {
 //   cancel how much of the swing can be cut short by the next attack once the blow has landed
 //   stop   hit-stop seconds for a light hit, a crit, a heavy hit
 //   kick / shake / zoom  camera reaction   kb / flinch  knockback and stagger   recoil  how far they snap back
-//   lunge / lungeT  how far and how fast you close the gap   impact  slow motion after a heavy hit, seconds
+//   lunge / lungeT  how far and how fast you close the gap   impact  slow motion after a finishing blow, seconds
 //   sparks / trail / flash  size of the effects   pitch  pitch of the hit sound   lightShake  shake on a light hit
-const FEEL = { speed: 0.95, at: -0.02, cancel: 0.2, stop: [0.06, 0.1, 0.12], kick: 0.6, shake: 0.45, zoom: 1.7, kb: 1.0, flinch: 0.27, recoil: 1.0, lunge: 1.4, lungeT: 0.08, impact: 0.13, sparks: 1.7, trail: 1.6, flash: 0.12, pitch: 1.0, lightShake: 0 };
+const FEEL = { speed: 0.95, at: -0.02, cancel: 0.2, stop: [0.045, 0.07, 0.1], kick: 0.6, shake: 0.45, zoom: 1.7, kb: 1.0, flinch: 0.27, recoil: 1.0, lunge: 1.4, lungeT: 0.08, impact: 0.09, sparks: 1.7, trail: 1.6, flash: 0.12, pitch: 1.0, lightShake: 0 };
 
 // ---------- the moveset ----------
 // Light attacks string together, and a heavy attack branches off wherever you are in the string:
@@ -620,13 +622,13 @@ function resolveSwing(p) {
     View.shake = Math.max(View.shake, 10);
     Sfx.play('boom');
     forTargets((t) => {
-      if (dist(cx, cy, t.x, t.y) < R + t.r) landed = hitTarget(t, dmg, { a: angTo(p.x, p.y, t.x, t.y), kb: w.kb * m.kb, heavy: true, stun: m.stun, ko: m.ko, crit: ctr }) || landed;
+      if (dist(cx, cy, t.x, t.y) < R + t.r) landed = hitTarget(t, dmg, { a: angTo(p.x, p.y, t.x, t.y), kb: w.kb * m.kb, heavy: true, fin: true, stun: m.stun, ko: m.ko, crit: ctr }) || landed;
     });
   } else {
     const half = m.half || w.arc * m.arc;
     G.slashes.push({ x: p.x, y: p.y, a, reach: reach * (0.9 + FEEL.trail * 0.1), half, t: 0, life: (m.heavy ? 0.28 : 0.2) * FEEL.trail, col: TIER[w.tier], fin: !!m.heavy, dir: p.swingDir, line: m.kind === 'thrust' });
     forTargets((t) => {
-      if (inArc(p.x, p.y, a, reach, half, t)) landed = hitTarget(t, dmg, { a: angTo(p.x, p.y, t.x, t.y), kb: w.kb * m.kb, heavy: !!m.heavy, stun: m.air || (m.fin ? w.stun3 || 0 : 0), air: !!m.air, ko: m.ko, crit: ctr }) || landed;
+      if (inArc(p.x, p.y, a, reach, half, t)) landed = hitTarget(t, dmg, { a: angTo(p.x, p.y, t.x, t.y), kb: w.kb * m.kb, heavy: !!m.heavy, fin: !!m.fin, stun: m.air || (m.fin ? w.stun3 || 0 : 0), air: !!m.air, ko: m.ko, crit: ctr }) || landed;
     });
   }
   if (landed && ctr) { p.counterT = 0; floater(p.x, p.y, 112, T('counter'), '#8fe8ff', 22, 1.1); }
@@ -641,7 +643,7 @@ function slam(p, lv) {
   View.shake = Math.max(View.shake, 6 + 3 * lv);
   Sfx.play('boom');
   forTargets((t) => {
-    if (dist(p.x, p.y, t.x, t.y) < R + t.r) hitTarget(t, [0, 24, 40, 64][lv] * power(p) * (w.chg || 1), { a: angTo(p.x, p.y, t.x, t.y), kb: 140, stun: 0.45 + 0.25 * lv, air: true, heavy: true, ko: 0.6 + 0.35 * lv });
+    if (dist(p.x, p.y, t.x, t.y) < R + t.r) hitTarget(t, [0, 24, 40, 64][lv] * power(p) * (w.chg || 1), { a: angTo(p.x, p.y, t.x, t.y), kb: 140, stun: 0.45 + 0.25 * lv, air: true, heavy: true, fin: lv === 3, ko: 0.6 + 0.35 * lv });
   });
 }
 // R: Labor Arbitration. A very large book arrives from above.
@@ -833,7 +835,7 @@ function updatePlayer(dt) {
       forTargets((t) => {
         if (p.dashHit.has(t) || dist(p.x, p.y, t.x, t.y) > t.r + 40) return;
         p.dashHit.add(t);
-        hitTarget(t, 24 * power(p), { a: Math.atan2(vy, vx) + pick([-0.9, 0.9]), kb: 280, heavy: true });
+        hitTarget(t, 24 * power(p), { a: Math.atan2(vy, vx) + pick([-0.9, 0.9]), kb: 280, heavy: true, quick: true });
       });
     }
   } else if (p.lungeT > 0) { p.lungeT -= dt; vx = p.lvx; vy = p.lvy; }
@@ -879,7 +881,7 @@ function damageEnemy(e, d, b) {
 function launchCorpse(e) {
   const m = Math.hypot(e.kx, e.ky), a = m > 1 ? Math.atan2(e.ky, e.kx) : rand(TAU);
   G.corpses.push({ e, x: e.x, y: e.y, z: e.z || 0, vx: Math.cos(a) * 460, vy: Math.sin(a) * 460, vz: 300, rot: 0, vr: (Math.cos(a) >= 0 ? 1 : -1) * rand(9, 14), t: 0 });
-  G.hitstop = Math.max(G.hitstop, 0.11);
+  G.hitstop = Math.max(G.hitstop, 0.09);
   View.zk = Math.max(View.zk, 0.045);
 }
 function killEnemy(e, byPlayer) {

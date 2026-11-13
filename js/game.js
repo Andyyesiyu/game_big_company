@@ -303,9 +303,7 @@ function drawSlash(s) {
     const sweep = Math.min(1, u * 3.2 + 0.45), a0 = s.a - s.half * s.dir, a1 = a0 + s.half * 2 * sweep * s.dir;
     const r1 = s.reach * (1 + u * 0.1), r0 = s.reach * (0.3 + u * 0.5);
     c.beginPath(); c.arc(s.x, s.y, r1, a0, a1, s.dir < 0); c.arc(s.x, s.y, r0, a1, a0, s.dir > 0); c.closePath();
-    c.globalCompositeOperation = 'lighter';
-    c.strokeStyle = s.col; c.lineWidth = s.fin ? 26 : 16; c.globalAlpha = (1 - u) * 0.3; c.stroke();
-    c.globalCompositeOperation = 'source-over';
+    if (Q2D.level > 0) { c.globalCompositeOperation = 'lighter'; c.strokeStyle = s.col; c.lineWidth = s.fin ? 26 : 16; c.globalAlpha = (1 - u) * 0.3; c.stroke(); c.globalCompositeOperation = 'source-over'; }
     c.globalAlpha = (1 - u) * (s.fin ? 0.95 : 0.85);
     c.fillStyle = '#fff'; c.fill();
     c.strokeStyle = s.col; c.lineWidth = s.fin ? 8 : 5; c.stroke();
@@ -467,7 +465,8 @@ function drawPickup(k) {
 }
 
 function render() {
-  View.S = View.S0 * (1 + View.zk * CAM.zoom) * (1 + cineK() * 0.55);
+  // (at the plainest 2D level the zoom punch is left out: scaling the whole ground every hit is what made hits stutter there)
+  View.S = View.S0 * (1 + (Q2D.level > 0 ? View.zk * CAM.zoom : 0)) * (1 + cineK() * 0.55);
   const S = View.S, p = G.player, t = G.t;
   // with the lighting pass on, the world goes to an offscreen canvas and through the shader
   const fx = Post.ok && Settings.fx && Q2D.level > 0;
@@ -1275,8 +1274,8 @@ function frame(ts) {
   if (G.state === 'play') {
     // hit-stop: the world freezes for a few frames on a solid hit
     if (G.cine) updateCine(dt);
-    else if (G.hitstop > 0) { G.hitstop -= dt; updateFx(dt * 0.25); }
-    else if (G.impactT > 0) { G.impactT -= dt; update(dt * 0.3); } // the beat of slow motion after a heavy hit
+    else if (G.hitstop > 0) { G.hitstop -= dt; updateFx(dt); } // the fighters hold still; effects and the camera do not
+    else if (G.impactT > 0) { G.impactT -= dt; update(dt * 0.45); } // the beat of slow motion after a finishing blow
     else update(dt);
   } else if (G.state === 'menu') {
     updateFx(dt);

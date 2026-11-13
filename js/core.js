@@ -165,9 +165,10 @@ const Sfx = {
   noise(d, vol = 0.08, delay = 0, hp = 0) {
     if (!this.ctx || this.muted) return;
     const n = Math.floor(this.ctx.sampleRate * d);
-    const buf = this.ctx.createBuffer(1, n, this.ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    // one burst of noise per length, made once and replayed: no buffer to fill on every hit
+    const cache = this.noises || (this.noises = {});
+    let buf = cache[n];
+    if (!buf) { buf = cache[n] = this.ctx.createBuffer(1, n, this.ctx.sampleRate); const data = buf.getChannelData(0); for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / n); }
     const s = this.ctx.createBufferSource(), g = this.ctx.createGain();
     s.buffer = buf; g.gain.value = vol;
     let node = s;

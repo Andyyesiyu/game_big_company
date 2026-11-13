@@ -55,8 +55,9 @@ buttons that branch, a stamina bar, and big monsters you can knock over.
 - **Toppling a boss.** Heavy hits fill the yellow bar under the boss's health. Fill it and
   the boss falls over for three seconds and takes half as much damage again.
 - **Hit feel.** A long lunge closes the gap, trails and sparks are large, the camera pushes
-  in instead of shaking, the target snaps back, and heavy hits freeze for a moment and then
-  run slow for a beat. All of it is one table of numbers, `FEEL` in `js/world.js`.
+  in instead of shaking, and the target snaps back. A hit freezes the fighters for a few
+  hundredths of a second while sparks, numbers and the camera keep moving, and a finishing
+  blow is followed by a short beat of slow motion. All of it is one table of numbers, `FEEL` in `js/world.js`.
 - **Training ground** (title screen): five sandbags that never fall and never hit back, no
   circle, **B** steps through the weapons.
 - When your health is in the red the screen edge pulses, the bubble-tea button throbs and
