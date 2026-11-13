@@ -71,6 +71,17 @@ tea at the bottom, pause by the minimap. The HUD keeps clear of notches and home
 menus shrink to fit a phone on its side, the 3D view renders fewer pixels and a smaller
 shadow map, and the screen is kept awake during a match.
 
+**Loading and performance.** The page shows a splash at once and the menu as soon as the
+engine and game code have arrived; the model library is the last script on the page and
+swaps in when it has decoded. The models are trimmed hard (flat-shaded characters with no
+normals, simplified tree trunks, WebP textures), so the whole one-file build is about
+3.4 MB. At run time each character is a single draw call, trees, bushes, rocks and grass
+are split into map cells so only what is in view is drawn, and the 3D view has four
+quality levels (pixel ratio, anti-aliasing, shadow size, glow) that the game moves
+between by itself to hold the frame rate; you can also pin one in the menu. If the
+browser is drawing WebGL in software (hardware acceleration switched off), the game says
+so and uses the 2D view.
+
 Camera effects are deliberately restrained: ordinary hits lean the camera slightly, only
 heavy hits shake it, and the view eases into a small look-ahead as you run.
 
@@ -78,13 +89,16 @@ English and 中文 are both built in (toggle on the title screen).
 
 ## How a match works
 
-- **Objectives.** There is always one thing to do next, shown under your health with a
-  yellow arrow pointing the way and a reward for doing it: search two boxes, knock out
+- **Objectives.** There is always one thing to do next. Each new one is announced large in
+  the middle of the screen, then sits under your health; a column of light marks the
+  target, chevrons on the ground at your feet point the way, and there is a reward for
+  doing it: search two boxes, knock out
   two rivals, then go and make the nearest CEO sign, then the next one.
 - **Promotions.** Knock-outs, boxes and signatures fill the ring around your weapon.
   Each grade up (P5 to P10) adds health and damage and heals you.
-- **CEO entrances.** The first time you walk up to a CEO the fight pauses for a close-up.
-  Any attack key skips it. Each CEO you beat leaves a stamp on the title screen for good.
+- **CEO entrances.** The first time you walk up to a CEO the fight pauses for a close-up
+  of about four seconds. It cannot be skipped until the name has been on screen for a
+  moment, so a stray key press does not lose it. Each CEO you beat leaves a stamp on the title screen for good.
 - **Loot.** Stand next to a container to search it. Crates are everywhere; lockers sit at
   small work sites; safes are inside the five CEO plazas. Valuables come in six colour
   tiers, from a badge lanyard up to the red one: a **signed N+1 agreement**.
@@ -150,7 +164,7 @@ with the Graphics button in the menu.
 | `js/r3actors.js` | 3D renderer: character and creature rigs, per-frame sync of everything that moves, effects, the 2D overlay |
 | `js/r3models.js` | 3D renderer: loads the model library, animated character rigs, the bosses' looks, model trees, desks and containers |
 | `js/r3office.js` | 3D renderer: the office buildings (curtain-wall textures, lobbies, the five headquarters) |
-| `assets/models/` | the 26 models as GLB files (about 5 MB) |
+| `assets/models/` | the 24 models as GLB files (about 1.7 MB) |
 | `assets/models.js` | the same models packed as base64 into one script, which is what the game loads, so it still runs from `file://` and as a single file |
 | `tools/pack-models.js` | rebuilds `assets/models.js` from `assets/models/*.glb` |
 | `tools/build-models.mjs` | how the GLB files were trimmed from the original packs (needs the downloads listed in CREDITS.md) |

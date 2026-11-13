@@ -74,7 +74,7 @@ function swayMaterial(mat, amp) {
     sh.uniforms.uTime = R3.uTime;
     sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
-      vec4 ip = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+      vec4 ip = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
       float sw = (sin(uTime * 1.7 + ip.x * 0.021 + ip.z * 0.017) + sin(uTime * 0.9 + ip.z * 0.03) * 0.6) * ${amp.toFixed(3)} * position.y * position.y;
       transformed.x += sw; transformed.z += sw * 0.45;
       #endif`);
@@ -82,20 +82,49 @@ function swayMaterial(mat, amp) {
   return mat;
 }
 
+// Quality levels, from "anything will run this" to "nice graphics card". pr: pixel ratio cap; msaa: samples on
+// the scene target; shadow: shadow map size (0 = no shadows); taps: bloom samples; every: redraw shadows every
+// n-th frame. The game starts on a level that suits the device and then moves between them by itself.
+const QUALITY = [
+  { pr: 0.8, msaa: 0, shadow: 0, taps: 0, every: 1 },
+  { pr: 1.0, msaa: 0, shadow: 1024, taps: 6, every: 2 },
+  { pr: 1.25, msaa: 2, shadow: 1536, taps: 10, every: 1 },
+  { pr: 1.5, msaa: 4, shadow: 2048, taps: 14, every: 1 },
+];
+R3.setQuality = function (q) {
+  q = clamp(q, 0, QUALITY.length - 1);
+  if (!this.ok || q === this.ql) return;
+  const Q = QUALITY[q], sun = this.sun;
+  this.ql = q;
+  if (this.rt.samples !== Q.msaa) {
+    this.rt.dispose();
+    this.rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: Q.msaa });
+  }
+  sun.castShadow = Q.shadow > 0;
+  if (Q.shadow && sun.shadow.mapSize.x !== Q.shadow) { sun.shadow.mapSize.set(Q.shadow, Q.shadow); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+  this.postMat = this.postMats[Q.taps] || (this.postMats[Q.taps] = this.makePost(Q.taps));
+  this.postQuad.material = this.postMat;
+  this.postMat.uniforms.tD.value = this.rt.texture;
+  this.resize(View.W || innerWidth, View.H || innerHeight, DPR || 1);
+};
 R3.init = function (canvas) {
   if (!window.THREE) return;
   try {
     const r = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.shadowMap.enabled = true; r.shadowMap.type = Input.touch ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+    r.shadowMap.autoUpdate = false; // frame() decides when the shadow map is redrawn
+    // Is this real graphics hardware? With hardware acceleration off the browser draws WebGL on the CPU, far too slow for 3D.
+    try { const gl = r.getContext(), ex = gl.getExtension('WEBGL_debug_renderer_info'); this.gpu = ex ? String(gl.getParameter(ex.UNMASKED_RENDERER_WEBGL)) : ''; } catch (e) { this.gpu = ''; }
+    this.soft = /swiftshader|llvmpipe|software|basic render|softpipe/i.test(this.gpu);
     this.r = r; this.cv = canvas;
     const scene = (this.scene = new THREE.Scene());
     scene.fog = new THREE.FogExp2(0xa8c2a4, 0.00052);
     scene.background = new THREE.Color(0xa8c2a4);
-    this.cam = new THREE.PerspectiveCamera(38, 1, 20, 9000);
+    this.cam = new THREE.PerspectiveCamera(38, 1, 20, 4400); // the fog has swallowed everything well before this
     this.hemi = new THREE.HemisphereLight(0xd6ecff, 0x55663a, 0.5);
     const sun = (this.sun = new THREE.DirectionalLight(0xfff1d6, 1.0));
     sun.castShadow = true;
-    sun.shadow.mapSize.set(Input.touch ? 1024 : 2048, Input.touch ? 1024 : 2048);
+    sun.shadow.mapSize.set(1024, 1024);
     const sc = sun.shadow.camera;
     sc.left = -820; sc.right = 820; sc.top = 820; sc.bottom = -820; sc.near = 100; sc.far = 3600;
     sun.shadow.bias = -0.0005; sun.shadow.normalBias = 2.5;
@@ -104,10 +133,11 @@ R3.init = function (canvas) {
     this.dyn = new THREE.Group();
     scene.add(this.dyn);
     // the world renders to an off-screen target first, then one full-screen pass adds glow, sun shafts and the grade
-    this.rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: Input.touch ? 2 : 4 });
+    this.rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 0 });
     this.postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this.postMat = new THREE.ShaderMaterial({
-      uniforms: { tD: { value: this.rt.texture }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: this.uTime, uDay: { value: 0 }, uSlow: { value: 0 }, uOut: { value: 0 } },
+    this.postUni = { uRes: { value: new THREE.Vector2(1, 1) }, uTime: this.uTime, uDay: { value: 0 }, uSlow: { value: 0 }, uOut: { value: 0 } };
+    this.makePost = (TAPS) => new THREE.ShaderMaterial({
+      uniforms: Object.assign({ tD: { value: this.rt.texture } }, this.postUni),
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       fragmentShader: `
         precision highp float;
@@ -120,13 +150,13 @@ R3.init = function (canvas) {
           vec2 uv = vUv;
           vec3 col = min(texture2D(tD, uv).rgb, vec3(3.0));
           // bloom: bright things (lanterns, sparks, sunlit edges) bleed a soft glow
-          vec3 glow = vec3(0.0);
+          ${TAPS ? `vec3 glow = vec3(0.0);
           float px = uRes.y / 720.0;
-          for (int i = 0; i < 14; i++) {
-            float a = float(i) * 2.39996, r = (3.0 + float(i) * 2.3) * px;
+          for (int i = 0; i < ${TAPS}; i++) {
+            float a = float(i) * 2.39996, r = (3.0 + float(i) * ${(32.2 / TAPS).toFixed(2)}) * px;
             glow += clamp(texture2D(tD, uv + vec2(cos(a), sin(a)) * r / uRes).rgb - vec3(0.92), 0.0, 1.5);
           }
-          col += glow / 14.0 * mix(1.6, 2.2, uDay);
+          col += glow / ${TAPS}.0 * mix(1.6, 2.2, uDay);` : ''}
           // sun shafts fanning in from the upper-left, broken up by drifting haze
           vec2 q = uv - vec2(-0.10, 1.16);
           float haze = noise(uv * vec2(3.0, 2.0) + vec2(uTime * 0.02, 0.0));
@@ -149,11 +179,15 @@ R3.init = function (canvas) {
         }`,
       depthTest: false, depthWrite: false,
     });
+    this.postMats = {};
     this.postScene = new THREE.Scene();
-    this.postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.postMat));
+    this.postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), null);
+    this.postScene.add(this.postQuad);
     this.v = new THREE.Vector3(); this.v2 = new THREE.Vector3(); this.m4 = new THREE.Matrix4(); this.q = new THREE.Quaternion(); this.col = new THREE.Color();
     this.initActors();
     this.ok = true;
+    this.ql = -1;
+    this.setQuality(Input.touch ? 1 : 2);
   } catch (e) {
     this.ok = false;
     if (window.console) console.warn('3D renderer unavailable, staying in 2D:', e.message);
@@ -162,11 +196,11 @@ R3.init = function (canvas) {
 
 R3.resize = function (w, h, dpr) {
   if (!this.ok) return;
-  const pr = Math.min(dpr, Input.touch ? 1.25 : 1.5); // phones: fewer pixels, the screen is dense anyway
+  const pr = Math.min(dpr, QUALITY[Math.max(0, this.ql)].pr);
   this.r.setPixelRatio(pr);
   this.r.setSize(w, h, false);
   this.rt.setSize(Math.round(w * pr), Math.round(h * pr));
-  this.postMat.uniforms.uRes.value.set(w * pr, h * pr);
+  this.postUni.uRes.value.set(w * pr, h * pr);
   this.cam.aspect = w / h;
   this.cam.fov = w < h ? 50 : 38;
   this.cam.updateProjectionMatrix();
@@ -189,7 +223,7 @@ R3.build = function () {
   this.ents.clear();
   if (this.playerRig) this.dyn.remove(this.playerRig.g);
   this.playerRig = null;
-  this.signs = []; this.bld = []; this.exits = []; this.lamps = []; this.occl = [];
+  this.signs = []; this.bld = []; this.exits = []; this.lamps = []; this.occl = []; this.cells = [];
   this.desks = new Map(); this.conts = new Map();
   const W = (this.world = new THREE.Group()), M = G.map, m4 = this.m4, col = this.col;
   this.scene.add(W);
@@ -322,13 +356,20 @@ R3.build = function () {
       const a = rand(TAU), d = Math.sqrt(rand()) * q.r;
       spots.push([q.x + Math.cos(a) * d, q.y + Math.sin(a) * d, rand(38, 58), pick(['#3b8232', '#519c40', '#6fb854'])]);
     }
-    const gm = new THREE.InstancedMesh(g, swayMaterial(new THREE.MeshLambertMaterial({ color: 0xffffff }), 0.16), spots.length);
-    gm.receiveShadow = true;
-    spots.forEach((s, i) => {
-      m4.compose(this.v.set(s[0], 0, s[1]), this.q.setFromAxisAngle(this.v2.set(0, 1, 0), i * 1.7), this.v2.set(s[2], s[2], s[2]));
-      gm.setMatrixAt(i, m4); gm.setColorAt(i, col.set(s[3]));
-    });
-    W.add(gm);
+    // one instanced mesh per map cell, so only the grass in view is drawn
+    const gmat = swayMaterial(new THREE.MeshLambertMaterial({ color: 0xffffff }), 0.16);
+    g.boundingSphere = cellSphere(60);
+    for (const c of cellsOf(spots.map((s, i) => ({ x: s[0], y: s[1], s: s[2], col: s[3], rot: i * 1.7 })), 1700).values()) {
+      const gm = new THREE.InstancedMesh(g, gmat, c.items.length);
+      gm.receiveShadow = true; gm.frustumCulled = true;
+      gm.position.set(c.x, 0, c.y);
+      c.ims.push(gm);
+      c.items.forEach((q, i) => {
+        m4.compose(this.v.set(q.x - c.x, 0, q.y - c.y), this.q.setFromAxisAngle(this.v2.set(0, 1, 0), q.rot), this.v2.set(q.s, q.s, q.s));
+        gm.setMatrixAt(i, m4); gm.setColorAt(i, col.set(q.col));
+      });
+      W.add(gm);
+    }
   }
 
   // --- buildings (the five HQs and the field offices: see r3office.js), desks, containers, shuttle stops ---
@@ -458,13 +499,23 @@ R3.light = function () {
     this.lampLights.forEach((l, i) => { const q = near[i]; if (q) l.position.set(q.x, q.h, q.y + 10); });
   }
   for (const l of this.lampLights) l.intensity = 0.35 + d * 1.5;
-  const u = this.postMat.uniforms;
+  const u = this.postUni;
   u.uDay.value = d; u.uSlow.value = clamp(G.slowT * 2, 0, 1); u.uOut.value = lerp(u.uOut.value, out, 0.1);
 };
 
 // ---------- things in the world that change: signs, doors, shuttles, the circle, what blocks your view ----------
 R3.syncWorld = function (dt) {
   const p = G.player, z = G.zone, t = G.t;
+  {
+    // The camera looks down at the ground, so past a certain distance nothing standing on it can be on screen
+    // even though it is inside the view volume. Switch off the map cells (trees, bushes, rocks, grass) beyond it.
+    const cam = this.cam, f = cam.getWorldDirection(this.v), top = Math.asin(clamp(-f.y, -1, 1)) - (cam.fov * Math.PI) / 360;
+    const lim = (top > 0.05 ? Math.min(4400, cam.position.y / Math.tan(top)) : 4400) + CELL * 0.71 + 80, cx = cam.position.x, cy = cam.position.z;
+    for (const c of this.cells) {
+      const vis = dist(c.x, c.y, cx, cy) < Math.min(lim, c.far + CELL * 0.71);
+      if (c.vis !== vis) { c.vis = vis; for (const im of c.ims) im.visible = vis; }
+    }
+  }
   if (this.lang !== LANG.zh) {
     this.lang = LANG.zh;
     for (const s of this.signs) {
@@ -490,8 +541,8 @@ R3.syncWorld = function (dt) {
       if (Math.abs(o._hide - hide) < 0.01) continue;
       o._hide = lerp(o._hide, hide, 0.2);
       const q = o._ti, k = 1 - o._hide * 0.78;
-      for (const im of this.treeInst[q.t]) {
-        this.m4.compose(this.v.set(q.x, 0, q.y), this.q.setFromAxisAngle(this.v2.set(0, 1, 0), q.rot), this.v2.set(q.s, q.s * k, q.s)).multiply(im.userData.local);
+      for (const im of q.cell.ims) {
+        this.m4.compose(this.v.set(q.x - q.cell.x, 0, q.y - q.cell.y), this.q.setFromAxisAngle(this.v2.set(0, 1, 0), q.rot), this.v2.set(q.s, q.s * k, q.s)).multiply(im.userData.local);
         im.setMatrixAt(q.idx, this.m4); im.instanceMatrix.needsUpdate = true;
       }
     }
@@ -543,6 +594,7 @@ R3.frame = function (dt) {
   this.light();
   this.syncWorld(dt);
   this.syncActors(G.hitstop > 0 ? 0 : dt); // animations freeze with the world on a hit
+  if (this.frameNo % QUALITY[this.ql].every === 0) this.r.shadowMap.needsUpdate = true;
   this.r.setRenderTarget(this.rt);
   this.r.render(this.scene, this.cam);
   this.r.setRenderTarget(null);

@@ -203,6 +203,9 @@ R3.office = function (W, ob) {
     if (key === 'pony' || key === 'yiming') car(cars[n % 3], ob.w / 2 - 44, 52, 0.06);
     if (key !== 'sam') car(cars[(n + 1) % 3], -ob.w / 2 + 44, 56, -0.05);
   }
+  // nothing inside a building moves: fix the matrices once instead of recomputing them every frame
+  g.updateMatrixWorld(true);
+  g.traverse((c) => { if (c !== g) c.matrixAutoUpdate = false; });
   W.add(g);
   this.bld.push({ ob, g, mats: [], a: 1, sy: 1 });
 };

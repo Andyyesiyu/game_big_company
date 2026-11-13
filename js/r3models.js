@@ -18,7 +18,8 @@ const BOSS_LOOK = {
 };
 
 R3.loadModels = function (done) {
-  if (!this.ok || typeof MODEL_B64 === 'undefined' || !THREE.GLTFLoader || !THREE.SkeletonUtils) return;
+  if (!this.ok || this.loadingModels || typeof MODEL_B64 === 'undefined' || !THREE.GLTFLoader || !THREE.SkeletonUtils) return;
+  this.loadingModels = true;
   const loader = new THREE.GLTFLoader(), names = Object.keys(MODEL_B64), lib = {};
   // The stock loader turns each embedded texture into a blob: URL and fetch()es it, which a hosted page's
   // content policy can forbid. Decode the image bytes directly instead: remember which blob each URL was
@@ -44,14 +45,20 @@ R3.loadModels = function (done) {
   const fin = () => {
     if (--left) return;
     restore();
-    if (failed || !lib.Casual_Male || !lib.Robot) return;
-    try { this.prepModels(lib); this.models = lib; done(); } catch (e) { if (window.console) console.warn('Models unusable, keeping the built-in shapes:', e.message); }
+    if (failed || !lib.Casual_Male || !lib.Robot) { this.modelsFailed = true; return; }
+    try { this.prepModels(lib); this.models = lib; done(); } catch (e) { this.modelsFailed = true; if (window.console) console.warn('Models unusable, keeping the built-in shapes:', e.message); }
   };
-  for (const n of names) {
-    const s = atob(MODEL_B64[n]), u = new Uint8Array(s.length);
-    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
-    loader.parse(u.buffer, '', (g) => { lib[n] = g; fin(); }, () => { failed = true; fin(); });
-  }
+  // a few models per tick, so the menu stays responsive while they decode
+  let at = 0;
+  const step = () => {
+    for (let k = 0; k < 4 && at < names.length; k++) {
+      const n = names[at++], s = atob(MODEL_B64[n]), u = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+      loader.parse(u.buffer, '', (g) => { lib[n] = g; fin(); }, () => { failed = true; fin(); });
+    }
+    if (at < names.length) setTimeout(step, 0);
+  };
+  step();
 };
 R3.prepModels = function (lib) {
   for (const n in lib) {
@@ -72,12 +79,87 @@ R3.prepModels = function (lib) {
         if (leafy) { mt.alphaTest = 0.4; mt.transparent = false; mt.side = THREE.DoubleSide; }
       }
     });
+    mergeSkinned(g);
     const b = new THREE.Box3().setFromObject(g.scene);
     g.userData.size = b.getSize(new THREE.Vector3()); g.userData.min = b.min.clone(); g.userData.center = b.getCenter(new THREE.Vector3());
   }
   this.clips = {}; for (const a of lib.Casual_Male.animations) this.clips[a.name] = a;
   this.robotClips = {}; for (const a of lib.Robot.animations) this.robotClips[a.name] = a;
 };
+// A character arrives as one skinned mesh per material (skin, shirt, hair...): seven draw calls each, and seven
+// more for its shadow. Join them into one mesh whose colours live on the vertices, and remember which vertices
+// belonged to which material so a copy can still be given its own skin tone, hair colour or outfit.
+function charMaterial() {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.85, metalness: 0 });
+  // faces turned to the camera sit in shade under a high sun: lift them with a little of their own colour
+  m.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * 0.24;'); };
+  m.customProgramCacheKey = () => 'char';
+  m.name = 'Body';
+  return m;
+}
+function mergeSkinned(g) {
+  const parts = [];
+  g.scene.traverse((m) => { if (m.isSkinnedMesh) parts.push(m); });
+  if (parts.length < 2) return;
+  let nv = 0, ni = 0;
+  for (const m of parts) { nv += m.geometry.attributes.position.count; ni += m.geometry.index.count; }
+  const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), si = new Uint16Array(nv * 4), sw = new Float32Array(nv * 4);
+  const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni), ranges = {};
+  // read one component of an attribute whether or not it is interleaved or stored as normalised integers
+  const read = (a, i, c) => {
+    const arr = a.isInterleavedBufferAttribute ? a.data.array : a.array, v = arr[a.isInterleavedBufferAttribute ? i * a.data.stride + a.offset + c : i * a.itemSize + c];
+    return a.normalized ? v / (arr instanceof Uint8Array ? 255 : arr instanceof Uint16Array ? 65535 : arr instanceof Int8Array ? 127 : arr instanceof Int16Array ? 32767 : 1) : v;
+  };
+  let v0 = 0, i0 = 0;
+  for (const m of parts) {
+    const ge = m.geometry, P = ge.attributes.position, J = ge.attributes.skinIndex, Wt = ge.attributes.skinWeight, c = m.material.color, n = P.count;
+    for (let i = 0; i < n; i++) {
+      const o = v0 + i;
+      for (let k = 0; k < 3; k++) pos[o * 3 + k] = read(P, i, k);
+      col[o * 3] = c.r; col[o * 3 + 1] = c.g; col[o * 3 + 2] = c.b;
+      for (let k = 0; k < 4; k++) { si[o * 4 + k] = J.isInterleavedBufferAttribute ? J.data.array[i * J.data.stride + J.offset + k] : J.array[i * 4 + k]; sw[o * 4 + k] = read(Wt, i, k); }
+    }
+    const I = ge.index.array;
+    for (let i = 0; i < I.length; i++) idx[i0 + i] = I[i] + v0;
+    ranges[m.material.name] = { v0, v1: v0 + n, i0, i1: i0 + I.length };
+    v0 += n; i0 += I.length;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+  geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.userData.shared = true;
+  const mat = charMaterial();
+  mat.userData.shared = true;
+  const first = parts[0], one = new THREE.SkinnedMesh(geo, mat);
+  one.name = 'Body'; one.castShadow = one.receiveShadow = true;
+  one.position.copy(first.position); one.quaternion.copy(first.quaternion); one.scale.copy(first.scale);
+  first.parent.add(one);
+  one.bind(first.skeleton, first.bindMatrix);
+  for (const m of parts) { m.parent.remove(m); m.geometry.dispose(); }
+  g.scene.updateMatrixWorld(true);
+  g.userData.ranges = ranges;
+}
+// Give one copy of a merged character its own colours: { Skin: '#...', Hair: '#...' or null to hide it, ... }.
+// Everything but the colours (and, when something is hidden, the index) is shared with every other copy.
+const _tc = new THREE.Color();
+function tintChar(mesh, ranges, map) {
+  const g0 = mesh.geometry, geo = new THREE.BufferGeometry(), col = g0.attributes.color.clone();
+  for (const k in g0.attributes) if (k !== 'color') geo.setAttribute(k, g0.attributes[k]);
+  let index = g0.index;
+  for (const name in map) {
+    const r = ranges[name];
+    if (!r) continue;
+    if (map[name] === null) { const a = index.array, out = new a.constructor(a.length - (r.i1 - r.i0)); out.set(a.subarray(0, r.i0)); out.set(a.subarray(r.i1), r.i0); index = new THREE.BufferAttribute(out, 1); continue; }
+    _tc.set(map[name]);
+    for (let i = r.v0; i < r.v1; i++) col.setXYZ(i, _tc.r, _tc.g, _tc.b);
+  }
+  geo.setAttribute('color', col); geo.setIndex(index);
+  geo.userData.shared = true; // most of its buffers belong to every copy: never dispose them with one rig
+  mesh.geometry = geo;
+}
 // the same texture with red and green swapped
 function greened(map) {
   const im = map.image, cv = document.createElement('canvas');
@@ -96,7 +178,9 @@ function cloneModel(src, skinned) {
   const o = skinned ? THREE.SkeletonUtils.clone(src.scene) : src.scene.clone(true), mats = [];
   o.traverse((m) => {
     if (!m.isMesh) return;
-    m.material = m.material.clone(); m.material.userData = {};
+    const m0 = m.material;
+    m.material = m0.clone(); m.material.userData = {};
+    if (m0.customProgramCacheKey() === 'char') { m.material.onBeforeCompile = m0.onBeforeCompile; m.material.customProgramCacheKey = m0.customProgramCacheKey; }
     mats.push(m.material);
     if (skinned) m.frustumCulled = false;
   });
@@ -108,13 +192,9 @@ function rigChar(name, sc = 1, skin, look) {
   const src = R3.models[name], g = new THREE.Group(), c = cloneModel(src, true), inner = c.o;
   inner.scale.multiplyScalar(CHAR_K);
   inner.position.y = -src.userData.min.y * CHAR_K;
-  const tone = skin || pick(SKIN_TONES);
-  for (const m of c.mats) {
-    if (m.name === 'Skin') m.color.set(tone);
-    else if (look && m.name === 'Hair') { if (look.hair) m.color.set(look.hair); else m.visible = false; }
-    else if (look && look.cols[m.name]) m.color.set(look.cols[m.name]);
-  }
-  selfLit(c.mats);
+  const tones = Object.assign({ Skin: skin || pick(SKIN_TONES) }, look ? look.cols : null);
+  if (look) tones.Hair = look.hair;
+  inner.traverse((m) => { if (m.isSkinnedMesh) tintChar(m, src.userData.ranges, tones); });
   g.add(inner);
   g.scale.setScalar(sc);
   const mixer = new THREE.AnimationMixer(inner), actions = {};
@@ -182,8 +262,9 @@ function rigRobot(height, tint) {
   const src = R3.models.Robot, g = new THREE.Group(), c = cloneModel(src, true), k = height / src.userData.size.y;
   c.o.scale.multiplyScalar(k);
   c.o.position.y = -src.userData.min.y * k;
+  c.o.traverse((m) => { if (m.isSkinnedMesh && src.userData.ranges) tintChar(m, src.userData.ranges, { Main: tint }); });
   for (const m of c.mats) if (m.name === 'Main') m.color.set(tint);
-  selfLit(c.mats);
+  selfLit(c.mats.filter((m) => m.name !== 'Body'));
   g.add(c.o);
   const mixer = new THREE.AnimationMixer(c.o), actions = {};
   for (const n in R3.robotClips) actions[n] = mixer.clipAction(R3.robotClips[n]);
@@ -222,22 +303,42 @@ R3.place = function (W, name, x, y, scale, rotY = 0, cx = true) {
   c.g = g;
   return c;
 };
-// Many copies of one model as instanced meshes. items: [{ x, y, s, rot }]; returns the instanced meshes.
-R3.scatter = function (W, name, items, cast = true) {
-  const src = this.models[name], out = [], m4 = this.m4, base = new THREE.Matrix4().makeTranslation(-src.userData.center.x, -src.userData.min.y, -src.userData.center.z);
+// Many copies of one model as instanced meshes. items: [{ x, y, s, rot }]. The map is cut into cells with one
+// instanced mesh per cell, because three culls an instanced mesh as a whole: without cells every tree on the
+// map is drawn (and drawn again into the shadow map) every frame. Each item learns its cell and its slot in it.
+const CELL = 600;
+function cellsOf(items, far = 1e9) {
+  const cells = new Map();
+  for (const q of items) {
+    const cx = Math.floor(q.x / CELL), cy = Math.floor(q.y / CELL), key = cx + ',' + cy;
+    let c = cells.get(key);
+    if (!c) { cells.set(key, (c = { x: (cx + 0.5) * CELL, y: (cy + 0.5) * CELL, items: [], ims: [], vis: true, far })); R3.cells.push(c); }
+    q.cell = c; q.idx = c.items.length; c.items.push(q);
+  }
+  return cells;
+}
+const cellSphere = (h) => new THREE.Sphere(new THREE.Vector3(0, h / 2, 0), CELL * 0.71 + h);
+R3.scatter = function (W, name, items, cast = true, far) {
+  const src = this.models[name], m4 = this.m4, base = new THREE.Matrix4().makeTranslation(-src.userData.center.x, -src.userData.min.y, -src.userData.center.z);
+  const cells = cellsOf(items, far), tall = Math.max(...items.map((q) => q.s)) * src.userData.size.y;
   src.scene.traverse((m) => {
     if (!m.isMesh) return;
-    const im = new THREE.InstancedMesh(m.geometry, m.material, items.length), local = base.clone().multiply(m.matrixWorld);
-    im.castShadow = cast; im.receiveShadow = true;
-    im.userData.local = local;
-    items.forEach((q, i) => {
-      m4.compose(this.v.set(q.x, 0, q.y), this.q.setFromAxisAngle(this.v2.set(0, 1, 0), q.rot || 0), this.v2.set(q.s, q.s * (q.sy || 1), q.s)).multiply(local);
-      im.setMatrixAt(i, m4);
-    });
-    W.add(im);
-    out.push(im);
+    const local = base.clone().multiply(m.matrixWorld);
+    m.geometry.boundingSphere = cellSphere(tall); // in the cell's own space: the whole cell, not one model
+    for (const c of cells.values()) {
+      const im = new THREE.InstancedMesh(m.geometry, m.material, c.items.length);
+      im.castShadow = cast; im.receiveShadow = true;
+      im.frustumCulled = true; // (three turns this off for instanced meshes; the cell's bounding sphere makes it safe)
+      im.userData.local = local;
+      im.position.set(c.x, 0, c.y);
+      c.items.forEach((q, i) => {
+        m4.compose(this.v.set(q.x - c.x, 0, q.y - c.y), this.q.setFromAxisAngle(this.v2.set(0, 1, 0), q.rot || 0), this.v2.set(q.s, q.s * (q.sy || 1), q.s)).multiply(local);
+        im.setMatrixAt(i, m4);
+      });
+      W.add(im);
+      c.ims.push(im);
+    }
   });
-  return out;
 };
 R3.modelNature = function (W, trees, rocks) {
   const M = this.models, TT = ['CommonTree_3', 'CommonTree_5', 'Pine_1'], by = {};
@@ -248,7 +349,7 @@ R3.modelNature = function (W, trees, rocks) {
     o._hide = 0;
     list.push(o._ti);
   });
-  for (const t in by) this.treeInst[t] = this.scatter(W, t, by[t]);
+  for (const t in by) this.scatter(W, t, by[t]);
   const RK = ['Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3'], rb = {};
   rocks.forEach((o, i) => { const t = RK[i % 3]; (rb[t] || (rb[t] = [])).push({ x: o.x, y: o.y, s: (o.r * 2.2) / M[t].userData.size.x, rot: i * 1.9 }); });
   for (const t in rb) this.scatter(W, t, rb[t]);
@@ -259,7 +360,7 @@ R3.modelNature = function (W, trees, rocks) {
     if (!isClear(x, y, 26)) continue;
     bushes.push({ x, y, s: rand(18, 30), rot: i * 1.3 });
   }
-  this.scatter(W, 'Bush_Common', bushes, false);
+  this.scatter(W, 'Bush_Common', bushes, false, 2100); // decoration: not worth drawing far away
 };
 R3.modelDesk = function (W, ob) {
   const sz = this.models.table_medium_long.userData.size, th = THEMES[ob.theme];

@@ -436,6 +436,7 @@ function questNow() {
 function updateQuest(dt) {
   const q = G.quest, p = G.player;
   q.doneT = Math.max(0, q.doneT - dt);
+  if (q.doneT <= 0) q.showT = Math.max(0, q.showT - dt);
   if ((q.scan -= dt) > 0 && q.now) { q.now.cur = q.now.kind === 'loot' ? p.opened - q.base : q.now.kind === 'fight' ? G.kills - q.base : q.now.kind === 'boss' ? G.signed - q.base : 0; }
   else { q.scan = 0.4; q.now = questNow(); q.tg = q.now.tg || questTarget(q.now.kind); }
   const s = q.now;
@@ -444,7 +445,7 @@ function updateQuest(dt) {
   floater(p.x, p.y, 118, T('qs_done') + (s.reward === 'tea' ? '  ' + T('tea') + ' +1' : '  +' + s.reward), '#ffe14d', 20, 1.6);
   Sfx.play('safe');
   gainXp(25);
-  q.i++; q.doneT = 1.6; q.scan = 0;
+  q.i++; q.doneT = 1.6; q.scan = 0; q.showT = q.showMax = 3.6;
   q.base = q.i === 1 ? G.kills : G.signed;
 }
 

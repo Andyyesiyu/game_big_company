@@ -1,9 +1,12 @@
 // Packs the source models into assets/models.js. Run from a folder that holds the downloads
 // (see CREDITS.md): conv/ = the Quaternius characters converted from FBX to GLB with fbx2gltf,
 // natsm/ = the nature kit with textures shrunk to 256px, raw/ = the KayKit files and Robot.glb.
-// Needs @gltf-transform/core, /functions and /extensions (v3). Writes out/*.glb and models.js.
+// Needs @gltf-transform/core, /functions and /extensions (v3), sharp and meshoptimizer.
+// Writes out/*.glb (copy them to assets/models/, then run tools/pack-models.js).
 import { NodeIO } from '@gltf-transform/core';
-import { prune, dedup, resample, quantize, weld } from '@gltf-transform/functions';
+import { prune, dedup, resample, quantize, weld, textureCompress, simplify } from '@gltf-transform/functions';
+import { MeshoptSimplifier } from 'meshoptimizer';
+import sharp from 'sharp';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import fs from 'fs';
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
@@ -12,9 +15,18 @@ async function proc(name, file, o = {}) {
   const doc = await io.read(file), root = doc.getRoot();
   for (const a of root.listAnimations()) {
     const n = a.getName().replace('CharacterArmature|', '');
-    if (!o.keep || !o.keep.includes(n)) a.dispose(); else a.setName(n);
+    // (drop the channels and samplers too, or their keyframe data stays in the file with nothing using it)
+    if (!o.keep || !o.keep.includes(n)) { for (const c of a.listChannels()) c.dispose(); for (const sm of a.listSamplers()) sm.dispose(); a.dispose(); } else a.setName(n);
   }
   for (const m of root.listMaterials()) { m.setNormalTexture(null); m.setOcclusionTexture(null); m.setMetallicRoughnessTexture(null); m.setEmissiveTexture(null); }
+  // Characters and the robot are drawn flat-shaded, so their normals can go: without them vertices shared
+  // between faces merge, and the mesh is less than half the size. (The loader shades a mesh with no normals flat.)
+  if (o.flat) for (const m of root.listMeshes()) for (const p of m.listPrimitives()) p.setAttribute('NORMAL', null);
+  if (o.flat) await doc.transform(weld({ tolerance: 0.00001 }));
+  if (o.webp && root.listTextures().length) await doc.transform(textureCompress({ encoder: sharp, targetFormat: 'webp', quality: 82, resize: o.webp === true ? undefined : [o.webp, o.webp] }));
+  // Trunks and branches carry far more triangles than they need at this camera distance. Leaf cards are all
+  // border, so locking borders leaves them exactly as they were.
+  if (o.simp) { await MeshoptSimplifier.ready; await doc.transform(weld({ tolerance: 0.0001 }), simplify({ simplifier: MeshoptSimplifier, ratio: o.simp, error: 0.02, lockBorder: true })); }
   await doc.transform(dedup(), ...(o.keep ? [resample()] : []), prune(), ...(o.skinned ? [quantize({ pattern: /^(NORMAL|WEIGHTS|JOINTS|TEXCOORD)/ })] : [weld(), quantize({ quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 12 })]));
   const glb = await io.writeBinary(doc);
   fs.writeFileSync(`out/${name}.glb`, glb);
@@ -24,13 +36,13 @@ async function proc(name, file, o = {}) {
 const log = [];
 const P = async (...a) => log.push(a[0] + ':' + Math.round((await proc(...a)) / 1024) + 'k');
 const KEEP = ['Idle', 'Walk', 'Punch', 'RecieveHit', 'Defeat', 'SitDown', 'StandUp', 'Victory', 'PickUp'];
-await P('Casual_Male', 'conv/Casual_Male.glb', { keep: KEEP, skinned: true });
-for (const c of ['Casual_Female', 'Casual2_Male', 'Casual3_Male', 'Casual3_Female', 'Casual_Bald', 'Worker_Male', 'Suit_Male', 'Suit_Female', 'OldClassy_Male']) await P(c, `conv/${c}.glb`, { skinned: true });
-await P('Robot', 'raw/Robot.glb', { keep: ['Idle', 'Walking', 'Running', 'Punch', 'Death'], skinned: true });
-for (const n of ['CommonTree_3', 'CommonTree_5', 'Pine_1', 'Bush_Common', 'Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3']) await P(n, `natsm/${n}.gltf`);
-for (const n of ['chest', 'box_large']) await P(n, `raw/${n}.glb`);
-for (const n of ['table_medium_long', 'cabinet_medium']) await P(n, `raw/furn/${n}.gltf`);
-for (const n of ['streetlight', 'car_sedan', 'car_taxi', 'car_hatchback']) await P(n, `raw/city/${n}.gltf`);
+await P('Casual_Male', 'conv/Casual_Male.glb', { keep: KEEP, skinned: true, flat: true });
+for (const c of ['Casual_Female', 'Casual2_Male', 'Casual3_Male', 'Casual3_Female', 'Worker_Male', 'Suit_Male', 'Suit_Female']) await P(c, `conv/${c}.glb`, { skinned: true, flat: true });
+await P('Robot', 'raw/Robot.glb', { keep: ['Idle', 'Walking', 'Running', 'Punch', 'Death'], skinned: true, flat: true });
+for (const n of ['CommonTree_3', 'CommonTree_5', 'Pine_1', 'Bush_Common', 'Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3']) await P(n, `natsm/${n}.gltf`, { webp: /Rock/.test(n) ? 128 : true, simp: /Tree|Pine/.test(n) ? 0.3 : 0 });
+for (const n of ['chest', 'box_large']) await P(n, `raw/${n}.glb`, { webp: 256 });
+for (const n of ['table_medium_long', 'cabinet_medium']) await P(n, `raw/furn/${n}.gltf`, { webp: 256 });
+for (const n of ['streetlight', 'car_sedan', 'car_taxi', 'car_hatchback']) await P(n, `raw/city/${n}.gltf`, { webp: 256 });
 console.log(log.join(' '));
 const js = '// Generated by tools/build-models.mjs. CC0 models, see CREDITS.md. Each value is a base64 GLB.\nconst MODEL_B64 = ' + JSON.stringify(out) + ';\n';
 fs.writeFileSync('out/models.js', js);

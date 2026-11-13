@@ -18,16 +18,18 @@ const KITS = [
 ];
 const Settings = {
   fx: true, auto: true, // auto: step down (3D -> 2D -> no lighting pass) by itself if this device can't keep up
-  mode3d: true,
+  mode3d: true, forced3d: false, forcedFx: false,
+  quality: -1, // 3D quality level 0..3, or -1 to let the game pick and adjust it
   load() {
     try { const v = localStorage.getItem('layoff_games_fx'); if (v !== null) this.fx = v === '1'; } catch (e) { /* ignore */ }
     if (/[?&]fx=0/.test(location.search)) this.fx = false;
-    if (/[?&]fx=1/.test(location.search)) { this.fx = true; this.auto = false; }
+    if (/[?&]fx=1/.test(location.search)) { this.fx = true; this.auto = false; this.forcedFx = true; }
+    try { const v = localStorage.getItem('layoff_games_q'); if (v !== null) this.quality = clamp(+v || 0, -1, 3); } catch (e) { /* ignore */ }
     try { const v = localStorage.getItem('layoff_games_3d'); if (v !== null) this.mode3d = v === '1'; } catch (e) { /* ignore */ }
     if (/[?&]mode=2d/.test(location.search)) this.mode3d = false;
-    if (/[?&]mode=3d/.test(location.search)) { this.mode3d = true; this.auto = false; }
+    if (/[?&]mode=3d/.test(location.search)) { this.mode3d = true; this.auto = false; this.forced3d = true; }
   },
-  save() { try { localStorage.setItem('layoff_games_fx', this.fx ? '1' : '0'); localStorage.setItem('layoff_games_3d', this.mode3d ? '1' : '0'); } catch (e) { /* ignore */ } },
+  save() { try { localStorage.setItem('layoff_games_fx', this.fx ? '1' : '0'); localStorage.setItem('layoff_games_3d', this.mode3d ? '1' : '0'); localStorage.setItem('layoff_games_q', String(this.quality)); } catch (e) { /* ignore */ } },
 };
 const money = (n) => '¥' + Math.round(n).toLocaleString('en-US');
 
@@ -54,11 +56,11 @@ function startMatch(kit) {
     }
   }
   Object.assign(G, { state: 'play', time: 0, kills: 0, signed: 0, exT: 0, exitsOpen: false, result: null, lastHit: '', cine: null });
-  G.quest = { i: 0, base: 0, doneT: 0, scan: 0, now: null, tg: null };
+  G.quest = { i: 0, base: 0, doneT: 0, scan: 0, now: null, tg: null, showT: 0, showMax: 6 };
   View.cam.x = p.x; View.cam.y = p.y;
   try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {}); } catch (e) { /* not available */ }
   UI.hide();
-  banner(T('drop_title', G.total), T('drop_sub'), 3.2, '#ffe08a');
+  G.quest.showT = 6; // the first objective is announced large, in the middle of the screen
   Sfx.play('boss');
 }
 
@@ -141,17 +143,20 @@ function update(dt) {
 // The first time you walk up to a CEO the fight holds its breath: the camera goes in close, the name comes up.
 function startCine(b) {
   const p = G.player;
-  G.cine = { b, t: 0, dur: 2.7 };
+  G.cine = { b, t: 0, dur: 4.6 };
+  Input.pressed = {};
   p.moving = false; p.mvx = p.mvy = 0; p.charge = 0; p.hold = 0; p.buf = p.hbuf = 0;
   G.banner = null;
   Sfx.play('boss');
 }
-const cineK = () => { const c = G.cine; if (!c) return 0; const k = clamp(Math.min(c.t / 0.5, (c.dur - c.t) / 0.4), 0, 1); return k * k * (3 - 2 * k); };
+const cineK = () => { const c = G.cine; if (!c) return 0; const k = clamp(Math.min(c.t / 0.8, (c.dur - c.t) / 0.5), 0, 1); return k * k * (3 - 2 * k); };
 function updateCine(dt) {
   const c = G.cine;
   c.t += dt; c.b.t += dt;
-  // any button skips it
-  if (c.t > 0.5 && c.t < c.dur - 0.4 && (Input.take('lclick') | Input.take('Space') | Input.take('tap') | Input.take('Escape') | Input.take('KeyJ'))) c.t = c.dur - 0.4;
+  // It cannot be skipped until the name has been up for a moment: whatever you were mashing when it began is
+  // thrown away. After that, a deliberate press moves on.
+  if (c.t < 2.6) Input.pressed = {};
+  else if (c.t < c.dur - 0.5 && (Input.take('lclick') | Input.take('Space') | Input.take('tap') | Input.take('Escape') | Input.take('KeyJ'))) c.t = c.dur - 0.5;
   updateCamera(dt, lerp(G.player.x, c.b.x, cineK()), lerp(G.player.y, c.b.y - 30, cineK()));
   updateFx(dt * 0.3);
   if (c.t < c.dur) return;
@@ -163,7 +168,7 @@ function drawCine() {
   const c = G.cine, W = View.W, H = View.H, u = clamp(Math.min(W, H) / 720, 0.72, 1.25), k = cineK(), col = THEMES[c.b.id].neon;
   const bh = H * 0.13 * k;
   ctx.fillStyle = '#15121f'; ctx.fillRect(0, 0, W, bh); ctx.fillRect(0, H - bh, W, bh);
-  const a = clamp((c.t - 0.4) / 0.3, 0, 1) * clamp((c.dur - c.t) / 0.35, 0, 1);
+  const a = clamp((c.t - 0.9) / 0.4, 0, 1) * clamp((c.dur - c.t) / 0.45, 0, 1);
   if (a <= 0) return;
   const size = Math.min(66 * u, W * 0.088), x = W * 0.07 - (1 - a) * 70, y = H - bh - size * 1.75;
   ctx.globalAlpha = a;
@@ -743,6 +748,28 @@ function drawHUD() {
     const qt = G.quest.tg, qn = G.quest.now;
     if (qt && qn && qn.kind !== 'exit' && !p.outside) {
       const qd = dist(p.x, p.y, qt.x, qt.y);
+      if (!(qn.kind === 'boss' && G.boss) && qd > 150) {
+        // a column of light on the target, and chevrons on the ground at your feet pointing the way
+        const b0 = toScreen(qt.x, qt.y, 0), b1 = toScreen(qt.x, qt.y, 320);
+        if (b0.ok !== false && b1.ok !== false) {
+          const lg = ctx.createLinearGradient(b0.x, b0.y, b1.x, b1.y);
+          lg.addColorStop(0, `rgba(255,225,77,${0.5 + Math.sin(G.t * 4) * 0.15})`); lg.addColorStop(1, 'rgba(255,225,77,0)');
+          ctx.strokeStyle = lg; ctx.lineWidth = 14 * u; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(b0.x, b0.y); ctx.lineTo(b1.x, b1.y); ctx.stroke();
+          ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 3 * u; ctx.beginPath(); ctx.moveTo(b0.x, b0.y); ctx.lineTo(b1.x, b1.y); ctx.stroke();
+        }
+        const ga = angTo(p.x, p.y, qt.x, qt.y), run = (G.t * 1.6) % 1;
+        for (let i = 0; i < 3; i++) {
+          const d0 = 96 + (i + run) * 34, al = clamp(1.25 - (i + run) / 2.6, 0, 1) * clamp((i + run) * 2, 0, 1);
+          const tip = toScreen(p.x + Math.cos(ga) * (d0 + 14), p.y + Math.sin(ga) * (d0 + 14), 2);
+          const l = toScreen(p.x + Math.cos(ga) * d0 + Math.cos(ga + 1.57) * 13, p.y + Math.sin(ga) * d0 + Math.sin(ga + 1.57) * 13, 2);
+          const r = toScreen(p.x + Math.cos(ga) * d0 - Math.cos(ga + 1.57) * 13, p.y + Math.sin(ga) * d0 - Math.sin(ga + 1.57) * 13, 2);
+          if (tip.ok === false || l.ok === false || r.ok === false) continue;
+          ctx.globalAlpha = al * 0.9; ctx.strokeStyle = INK; ctx.lineWidth = 7 * u; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(l.x, l.y); ctx.lineTo(tip.x, tip.y); ctx.lineTo(r.x, r.y); ctx.stroke();
+          ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 3.5 * u; ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
       edgeArrow(qt.x, qt.y, '#ffe14d', Math.round(qd / 10) + 'm');
       const sp = toScreen(qt.x, qt.y, qn.kind === 'boss' ? 150 : 96);
       if (qd > 110 && sp.ok !== false && sp.x > 40 && sp.x < W - 40 && sp.y > 70 && sp.y < H - 90 && !(qn.kind === 'boss' && G.boss)) {
@@ -770,6 +797,20 @@ function drawHUD() {
   }
 
   drawSkills(u);
+  // A new objective is announced large, in the upper middle of the screen, before it settles into its HUD slot.
+  if (qs && q.showT > 0 && G.state === 'play') {
+    const k = clamp(Math.min((q.showMax - q.showT) / 0.3, q.showT / 0.4), 0, 1), pop = 0.86 + 0.14 * k;
+    const tw = Math.min(W - 40, 470 * u) * pop, th = 104 * u * pop, tx = (W - tw) / 2, ty = H * 0.19 - th / 2 + sf.t;
+    ctx.globalAlpha = k;
+    plate(tx, ty, tw, th, 16 * u);
+    ctx.fillStyle = '#ffe14d'; ctx.strokeStyle = INK; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.roundRect(W / 2 - 54 * u, ty - 13 * u, 108 * u, 26 * u, 8 * u); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = INK; ctx.font = `900 ${Math.round(14 * u)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(T(q.i === 0 ? 'qs_first' : 'qs_next'), W / 2, ty + 1);
+    hudText(qs.text, W / 2, ty + th * 0.44, Math.min(34 * u, (tw * 1.5) / Math.max(6, qs.text.length)) * pop, '#fff', 'center', 900);
+    const rw = qs.reward === 'tea' ? T('tea') + ' +1' : qs.reward ? '¥' + qs.reward : '';
+    if (rw) hudText(T('qs_reward', rw), W / 2, ty + th * 0.78, 15 * u * pop, '#ffe08a', 'center', 800);
+    ctx.globalAlpha = 1;
+  }
   if (G.combo >= 2 && G.state === 'play') {
     const pop = 1 + Math.max(0, G.comboT - 2.45) * 2.4;
     hudText(G.combo + ' ' + T('combo'), W - pad, H * 0.44, (22 + Math.min(G.combo, 24) * 0.7) * u * pop, G.combo >= 10 ? '#ff8a3c' : '#ffe14d', 'right', 900);
@@ -1030,7 +1071,8 @@ const UI = {
 };
 const fmtTime = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
 const canFull = () => Input.touch && !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
-const optRow = () => `<div class="row">${canFull() ? `<button class="ghost" data-act="full">${T('full')}</button>` : ''}<button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="mode" ${R3.ok ? '' : 'disabled'}>${T(R3.on ? 'mode_3d' : 'mode_2d')}</button>${R3.on ? '' : `<button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button>`}</div>`;
+const qLabel = () => T('q_label', T(Settings.quality < 0 ? 'q_auto' : 'q_' + Settings.quality));
+const optRow = () => `<div class="row">${canFull() ? `<button class="ghost" data-act="full">${T('full')}</button>` : ''}<button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="mode" ${R3.ok ? '' : 'disabled'}>${T(R3.on ? 'mode_3d' : 'mode_2d')}</button>${R3.on ? `<button class="ghost" data-act="quality">${qLabel()}</button>` : ''}${R3.on ? '' : `<button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button>`}</div>`;
 
 function showTitle() {
   if (!G.map || G.state !== 'menu') { genWorld(); initZone(); G.player = makePlayer(); G.player.x = G.player.y = -9999; R3.build(); }
@@ -1044,6 +1086,7 @@ function showTitle() {
     <div class="stamps">${['pony', 'yiming', 'elon', 'sam', 'dario'].map((id) => `<span class="${Bank.ceo.includes(id) ? 'on' : ''}">${shortName(id)}</span>`).join('')}</div>
     <div class="row"><button class="ghost" data-act="how">${T('how')}</button></div>
     ${optRow()}
+    ${R3.ok && R3.soft ? `<p class="note">${T('no_gpu')}</p>` : R3.on && !R3.models && !R3.modelsFailed ? `<p class="note">${T('loading_models')}</p>` : ''}
     <p class="disc">${T('disclaimer')}</p>`);
 }
 // Controls and rules as pictures of keys, not paragraphs.
@@ -1065,6 +1108,7 @@ function showHow() {
 function showKits() {
   UI.show(() => `
     <div class="kicker">${T('kit_title')}</div>
+    <div class="steps"><span><b>1</b>${T('step_1')}</span><i>›</i><span><b>2</b>${T('step_2')}</span><i>›</i><span><b>3</b>${T('step_3')}</span></div>
     <div class="perks">${KITS.map((k, i) => `<button class="perk" data-act="kit" data-i="${i}" ${Bank.money < k.cost ? 'disabled' : ''}><span class="ic">${k.icon}</span><b>${T('kit_' + k.id + '_n')}</b><small>${T('kit_' + k.id + '_d')}</small><em>${k.cost ? money(k.cost) : T('kit_free')}</em></button>`).join('')}</div>
     <div class="bank"><i></i><b>${money(Bank.money)}</b></div>
     <button class="ghost" data-act="menu">${T('menu')}</button>`);
@@ -1111,6 +1155,7 @@ function onAction(act, el) {
   else if (act === 'mute') { Sfx.muted = !Sfx.muted; UI.refresh(); }
   else if (act === 'fx') { Settings.fx = !Settings.fx; Settings.save(); UI.refresh(); }
   else if (act === 'mode') { R3.on = Settings.mode3d = !R3.on; Settings.auto = false; Settings.save(); UI.refresh(); }
+  else if (act === 'quality') { Settings.quality = Settings.quality >= 3 ? -1 : Settings.quality + 1; Gov.cap = 3; Gov.good = 0; Gov.before = 0; Gov.locked = false; R3.setQuality(Settings.quality < 0 ? (Input.touch ? 1 : 2) : Settings.quality); Settings.save(); UI.refresh(); }
   else if (act === 'menu') showTitle();
   else if (act === 'full') { const d = document, e = d.documentElement; try { if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d); else (e.requestFullscreen || e.webkitRequestFullscreen).call(e); } catch (er) { /* not allowed here */ } }
   else if (act === 'how') { howBack = 'menu'; showHow(); }
@@ -1135,18 +1180,34 @@ function resize() {
   View.S = View.S0 = clamp(View.H > View.W ? Math.max(land, View.W / 640) : land, 0.42, 1.5);
 }
 
-let lastTs = 0, fpsN = 0, fpsT = 0, fpsChecks = 0;
+// Keeps the frame rate up by itself. It watches two-second windows during play: when the 3D view is slow it
+// drops a quality level (fewer pixels, cheaper shadows and glow), and at the lowest level falls back to 2D;
+// when there is clear headroom it climbs back, but never to a level that has already proved too heavy.
+const Gov = { n: 0, t: 0, good: 0, cap: 3, before: 0, locked: false };
+function governor(raw) {
+  Gov.n++; Gov.t += raw;
+  if (Gov.t < 2) return;
+  const fps = Gov.n / Gov.t;
+  Gov.n = 0; Gov.t = 0;
+  if (R3.on) {
+    if (Settings.quality >= 0) { if (fps < 14 && Settings.auto) { R3.on = false; } return; } // a level chosen by hand is left alone
+    if (Gov.locked) return;
+    // A drop that changed nothing means the browser itself is holding the rate down (a 30 fps power-saving
+    // mode, say), not the graphics: put the level back and stop adjusting.
+    if (Gov.before && Math.abs(fps - Gov.before) < 3 && fps > 24) { Gov.locked = true; R3.setQuality(R3.ql + 1); return; }
+    Gov.before = 0;
+    if (fps < 42) {
+      Gov.good = 0;
+      if (R3.ql > 0) { Gov.cap = R3.ql - 1; Gov.before = fps; R3.setQuality(R3.ql - 1); }
+      else if (fps < 20 && Settings.auto) R3.on = false;
+    } else if (fps > 57 && R3.ql < Math.min(Gov.cap, Input.touch ? 2 : 3)) { if (++Gov.good >= 4) { Gov.good = 0; R3.setQuality(R3.ql + 1); } }
+    else Gov.good = 0;
+  } else if (Settings.auto && Settings.fx && Post.ok && fps < 20) { Settings.fx = false; Settings.auto = false; }
+}
+let lastTs = 0;
 function frame(ts) {
   const raw = (ts - lastTs) / 1000 || 0, dt = Math.min(0.033, raw);
-  if (Settings.auto && raw < 2 && (R3.on || (Settings.fx && Post.ok))) { // (a gap over 2 s is a backgrounded tab, not a slow frame)
-    // watch the first few seconds: under ~18 fps means this is too heavy here, so step down a level
-    fpsN++; fpsT += raw;
-    if (fpsT >= 2) {
-      if (fpsN < 36) { if (R3.on) R3.on = false; else { Settings.fx = false; Settings.auto = false; } fpsChecks = 0; UI.refresh(); }
-      else if (++fpsChecks >= 4) Settings.auto = false;
-      fpsN = 0; fpsT = 0;
-    }
-  }
+  if (raw < 2 && G.state === 'play' && !G.cine) governor(raw); // (a gap over 2 s is a backgrounded tab, not a slow frame)
   lastTs = ts;
   G.t += dt;
   // noon at the drop, golden hour by the last circle
@@ -1190,8 +1251,12 @@ function boot() {
   Post.init(glCv);
   c3 = document.getElementById('c3');
   R3.init(c3);
+  // Without hardware acceleration the browser draws WebGL on the CPU: go straight to the plain 2D view.
+  if (R3.ok && R3.soft && !Settings.forced3d) Settings.mode3d = false;
+  if (R3.soft && !Settings.forcedFx) Settings.fx = false;
   R3.on = R3.ok && Settings.mode3d;
-  R3.loadModels(() => R3.build()); // swap the built-in shapes for the model library once it has decoded
+  if (R3.ok && Settings.quality >= 0) R3.setQuality(Settings.quality);
+  if (typeof MODEL_B64 !== 'undefined') modelsArrived();
   G.motes = [];
   for (let i = 0; i < 44; i++) G.motes.push({ x: rand(), y: rand(), s: rand(1.2, 3), ph: rand(TAU), v: rand(0.008, 0.03) });
   resize();
@@ -1208,7 +1273,15 @@ function boot() {
   canvas.addEventListener('pointerdown', () => Sfx.init());
   document.addEventListener('visibilitychange', () => { if (document.hidden && G.state === 'play') showPause(); });
   View.cam.x = ARENA.w / 2; View.cam.y = ARENA.h / 2;
+  const sp = document.getElementById('splash');
+  if (sp) sp.remove();
   showTitle();
   requestAnimationFrame(frame);
 }
-addEventListener('DOMContentLoaded', boot);
+// The model library is the last and by far the largest script on the page. The game is already running on its
+// built-in shapes by the time it arrives; swap them for the models as soon as they have decoded.
+function modelsArrived() {
+  R3.loadModels(() => { R3.build(); if (UI.cur && G.state === 'menu') UI.refresh(); });
+}
+// The canvases and menu container are above the scripts in the page, so there is nothing to wait for.
+boot();
