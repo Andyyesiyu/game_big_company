@@ -1,10 +1,10 @@
-# The Layoff Games · 优化游戏 — Campus Royale / 产业园大逃杀
+# The Layoff Games · 优化游戏 — Five Floors to N+1 / 连闯五家大厂
 
-A 3D action battle royale about the AI boom: melee combos, a lock-on, a dodge with a
+A 3D action roguelike about the AI boom: melee combos, a lock-on, a dodge with a
 perfect-dodge slow-motion window, in a misty forest campus rendered with Three.js.
-Thirty employees drop into a tech campus and there is one headcount left.
-Search boxes, lockers and safes, stay inside the shrinking **optimization circle**,
-then either catch a shuttle out with everything in your bag or be the last one employed.
+One run takes you through five tech companies. On each floor you clear two waves, then
+its CEO walks out; every stage you clear lets you pick one of three upgrades, and they
+stack until the run ends. Make all five sign the severance papers.
 
 **Parody and fiction.** Not affiliated with or endorsed by any person or company
 named. Nobody gets hurt: they go up in a puff of smoke, or sign the severance papers.
@@ -58,16 +58,16 @@ buttons that branch, a stamina bar, and big monsters you can knock over.
   in instead of shaking, and the target snaps back. A hit freezes the fighters for a few
   hundredths of a second while sparks, numbers and the camera keep moving, and a finishing
   blow is followed by a short beat of slow motion. All of it is one table of numbers, `FEEL` in `js/world.js`.
-- **Training ground** (title screen): five sandbags that never fall and never hit back, no
-  circle, **B** steps through the weapons.
+- **Training ground** (title screen): five sandbags that never fall and never hit back,
+  **B** steps through the weapons.
 - When your health is in the red the screen edge pulses, the bubble-tea button throbs and
   a prompt tells you to drink.
 - **Q · Pass the Blame**: throw a wok in a line; the first thing it hits is stunned.
 - **E · Clock-in Dash**: dash through enemies, hitting each once. Invulnerable mid-dash.
 - **R · Labor Arbitration**: a very large Labor Law book lands on the target area and stuns.
 - Hits land with hit-stop, screen shake, knockback, crits and a combo counter.
-- Health creeps back when nothing has hit you for a few seconds, and no more than two
-  rivals will press you at once.
+- Health creeps back when nothing has hit you for a few seconds, and only two rivals
+  (three on the last two floors) press the attack at once; the rest circle and wait.
 - Rivals fight in melee too. A red wedge on the ground shows where a swing is about to
   land; senior rivals telegraph a dash strike with a red line. Step out or dodge.
 
@@ -94,31 +94,37 @@ heavy hits shake it, and the view eases into a small look-ahead as you run.
 
 English and 中文 are both built in (toggle on the title screen).
 
-## How a match works
+## How a run works
 
-- **Objectives.** There is always one thing to do next. Each new one is announced large in
-  the middle of the screen, then sits under your health; a column of light marks the
-  target, chevrons on the ground at your feet point the way, and there is a reward for
-  doing it: search two boxes, knock out
-  two rivals, then go and make the nearest CEO sign, then the next one.
+- **Five floors.** Penguin Tower, Infinite Scroll, Hardcore Mars, AGI Soon, Safety First,
+  in that order. The purple wall is the edge of the floor you are on.
+- **Three stages a floor.** Wave one is the company's own AI products and whoever runs
+  them, plus a few colleagues. Wave two is bigger and brings middle managers. Then the
+  CEO walks out of the building with a close-up of about four seconds (it cannot be
+  skipped until the name has been on screen for a moment).
+- **Upgrades.** Clearing a wave pays a choice of one from three; a CEO's signature pays a
+  choice that counts double. There are nineteen (damage, attack speed, crits, life on hit,
+  stamina, cooldowns, extra woks for Q, a harder E, a bigger R, and so on) and each can be
+  taken a few times. They last until the run ends. The pause menu shows what you hold.
+- **Between stages.** A cleared wave heals a little; a signature heals you fully, and
+  everything left on the floor flies to you. Then the shuttle pulls up south of the plaza:
+  stand at the stop and it takes you to the next company.
+- **The objective** is always on screen under your health: how much of the wave is left
+  (one pip per enemy), whose signature you are after, or where the shuttle is. Each new
+  one is announced large first; a column of light and chevrons at your feet point at the
+  last stragglers, and the minimap shows the floor with everyone on it.
+- **It gets harder.** Every floor up, enemies have more health and hit harder, waves are
+  larger, and the CEO has more health. The numbers are at the top of `js/rogue.js`.
 - **Promotions.** Knock-outs, boxes and signatures fill the ring around your weapon.
   Each grade up (P5 to P10) adds health and damage and heals you.
-- **CEO entrances.** The first time you walk up to a CEO the fight pauses for a close-up
-  of about four seconds. It cannot be skipped until the name has been on screen for a
-  moment, so a stray key press does not lose it. Each CEO you beat leaves a stamp on the title screen for good.
-- **Loot.** Stand next to a container to search it. Crates are everywhere; lockers sit at
-  small work sites; safes are inside the five CEO plazas. Valuables come in six colour
+- **Loot.** Stand next to a container to search it: a crate, two lockers and two safes on
+  every floor. Better weapons turn up on higher floors. Valuables come in six colour
   tiers, from a badge lanyard up to the red one: a **signed N+1 agreement**.
-- **The circle.** The purple optimization circle shrinks in five phases over about five
-  minutes and hurts more each phase. The minimap shows the next circle as a dashed ring.
-- **Rivals.** The other 29 employees loot, rotate with the circle, fight you and each
-  other, flee when hurt, and sometimes take the shuttle themselves. Tall grass hides you
-  from them until you shoot.
-- **Extract or win.** Shuttles arrive 40 seconds in. Stand at a stop for 5 seconds to
-  bank everything you carry into your severance fund, which buys better starting kits.
-  Or be the last one standing for a bonus. Get optimized and you lose what you carried.
-- **CEOs.** Each plaza has a boss who only wakes when you walk in. Every attack is
-  telegraphed. Beat one and they sign: you get the red item, and their AI switches sides.
+- **How it ends.** Go down and you keep half of what you carried. Make all five sign and
+  you keep everything, plus a bonus. The severance fund buys better starting kits, and
+  each CEO you have ever beaten leaves a stamp on the title screen.
+- **CEOs.** Every attack is telegraphed. Beat one and they sign: you get the red item,
+  and their AI switches sides for the rest of the run.
 
 | Plaza | Boss | Signature moves | Guards → sidekick |
 |---|---|---|---|
@@ -187,10 +193,11 @@ with the Graphics button in the menu.
 | `tools/pack-models.js` | rebuilds `assets/models.js` from `assets/models/*.glb` |
 | `tools/build-models.mjs` | how the GLB files were trimmed from the original packs (needs the downloads listed in CREDITS.md) |
 | `vendor/` | Three.js r149 plus its glTF loader and SkeletonUtils (MIT), vendored so the game runs offline |
-| `js/world.js` | game state, map generation, action combat (combos, skills, hit feel), loot, rivals' AI, the circle, hazards, sidekicks |
+| `js/world.js` | game state, map generation, action combat (combos, skills, hit feel), loot, rivals' AI, hazards, sidekicks |
+| `js/rogue.js` | the run: floors, waves, the upgrades and how they are offered, the objective line |
 | `js/bosses.js` | boss framework plus the five attack decks |
 | `js/game.js` | match flow, render loop, HUD, skill buttons, minimap, menus, the severance fund |
 | `js/i18n.js` | every string, in English and Chinese |
 
-There are no image or audio files; sound is synthesised. The earlier tower-climb and
-shooter versions of the game are in the git history.
+There are no image or audio files; sound is synthesised. The earlier tower-climb,
+shooter and battle-royale versions of the game are in the git history.

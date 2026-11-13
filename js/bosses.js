@@ -18,6 +18,7 @@ function makeBoss(id, home) {
     id, def: d, home, x: home.x + home.w / 2, y: home.y + 130, z: 0, r: 24, hp: d.hp, maxhp: d.hp, t: rand(10), face: 1,
     q: [], busy: 0, cool: 1.6, phase: 1, flash: 0, say: null, sayT: 0, mode: 'orbit', orbitDir: pick([-1, 1]),
     stun: 0, ko: 0, koMax: d.koMax || 150, topple: 0, last: -1, contactCd: 0, crowd: 0, kx: 0, ky: 0, charge: 0, reflect: 0, shield: null, data: {}, moving: false, met: false,
+    away: true, gone: true, inv: true, hpK: 1, // not in the building yet: a CEO only shows up once their floor is cleared (see bossArrive)
   };
   if (d.init) d.init(b);
   return b;
@@ -344,7 +345,7 @@ const BOSSES = {
       banner(T('sam_fired'), T('sam_fired_sub'), 2.4, '#ffd54f');
       after(b, 2.6, () => banner(T('sam_days'), '', 1.6, '#b0bec5'));
       after(b, 4.4, () => {
-        b.gone = false; b.inv = false; b.maxhp = 550; b.hp = 550; b.phase = 2; b.busy = 0; b.cool = 1;
+        b.gone = false; b.inv = false; b.maxhp = b.hp = Math.round(550 * b.hpK); b.phase = 2; b.busy = 0; b.cool = 1;
         b.x = b.home.x + b.home.w / 2; b.y = b.home.y + 150;
         say(b, T('q_sam_back'), 2.6);
         banner(T('sam_back'), T('sam_back_sub'), 2, '#69f0ae');

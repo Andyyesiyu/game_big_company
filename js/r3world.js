@@ -578,7 +578,8 @@ R3.syncWorld = function (dt) {
   for (const x of this.exits) {
     x.ring.material.color.set(x.e.open ? 0x3fe08a : 0xffffff);
     x.ring.rotation.z = t * 0.5;
-    x.fill.visible = x.beam.visible = x.e.open;
+    x.fill.visible = x.e.open;
+    x.beam.visible = x.e.open && dist(View.cam.x, View.cam.y, x.e.x, x.e.y) > 900; // up close it would stand right in front of the camera
   }
   const r = Math.max(z.r, 0.5);
   this.storm.scale.set(r, 520, r); this.storm.position.set(z.x, 260, z.y);

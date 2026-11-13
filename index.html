@@ -106,6 +106,10 @@
   .perk small { font-size: 12.5px; color: var(--dim); line-height: 1.35; min-width: 0; }
   .perk em { font-style: normal; font-weight: 900; font-size: 15px; color: #ffe08a; padding: 3px 12px; border-radius: 999px; background: var(--ink); box-shadow: inset 0 2px 4px rgba(0,0,0,0.6); }
   /* results: counters set into the board */
+  .perks.gold .perk { border-color: #b8860b; background: linear-gradient(#fff6c9, #ffd96a); box-shadow: inset 0 3px 0 #fff, 0 6px 0 #b8860b, 0 6px 0 3px var(--ink); }
+  .boonrow { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 4px 0 14px; font-size: 20px; }
+  .boonrow span { position: relative; display: grid; place-items: center; width: 36px; height: 36px; background: #fff; border: 2.5px solid var(--ink); border-radius: 10px; box-shadow: 0 3px 0 var(--ink); }
+  .boonrow b { position: absolute; right: -6px; bottom: -6px; min-width: 17px; height: 17px; border-radius: 9px; font-size: 11px; line-height: 13px; color: #fff; background: var(--hot); border: 2px solid var(--ink); }
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px auto 10px; max-width: 500px; }
   .stats div { min-width: 0; padding: 9px 6px 8px; border: 3px solid var(--ink); border-radius: 12px; background: linear-gradient(#2a2438, #3d3654); box-shadow: inset 0 4px 8px rgba(0,0,0,0.55), 0 2px 0 rgba(255,255,255,0.7); }
   .stats span { display: block; font-size: 11px; font-weight: 700; color: #b3acc9; letter-spacing: 0.04em; }
@@ -139,6 +143,7 @@
 <script src="js/post.js"></script>
 <script src="js/world.js"></script>
 <script src="js/bosses.js"></script>
+<script src="js/rogue.js"></script>
 <script src="js/r3world.js"></script>
 <script src="js/r3actors.js"></script>
 <script src="js/r3models.js"></script>

@@ -41,48 +41,39 @@ function startMatch(kit, training) {
   Bank.money -= kit.cost; Bank.save();
   genWorld();
   R3.build();
-  initZone();
+  setArena(ARENA.w / 2, ARENA.h / 2, 3300);
   const p = (G.player = makePlayer());
-  for (let i = 0; i < 200; i++) {
-    const a = rand(TAU), d = rand(1500, 1900);
-    p.x = clamp(ARENA.w / 2 + Math.cos(a) * d, 320, ARENA.w - 320); p.y = clamp(ARENA.h / 2 + Math.sin(a) * d, 320, ARENA.h - 320);
-    if (isClear(p.x, p.y, 70) && !G.bosses.some((b) => dist(p.x, p.y, b.home.x + b.home.w / 2, b.home.y + b.home.h / 2) < 1000)) break;
-  }
   kit.apply(p);
-  for (let i = 0; i < G.total - 1; i++) {
-    for (let k = 0; k < 60; k++) {
-      const s = clearSpot(40);
-      if (s && dist(s.x, s.y, p.x, p.y) > 750) { spawnRival(s.x, s.y); break; }
-    }
-  }
-  Object.assign(G, { state: 'play', time: 0, kills: 0, signed: 0, exT: 0, exitsOpen: false, result: null, lastHit: '', cine: null });
-  G.quest = { i: 0, base: 0, doneT: 0, scan: 0, now: null, tg: null, showT: 0, showMax: 6 };
+  Object.assign(G, { state: 'play', time: 0, kills: 0, signed: 0, exT: 0, result: null, lastHit: '', cine: null, run: null, boss: null });
+  G.quest = { i: 0, doneT: 0, scan: 0, now: null, tg: null, showT: 0, showMax: 4 };
   G.training = !!training; G.impactT = 0;
   if (training) {
-    // the training ground: five sandbags in a ring, nobody else, no circle, every weapon on a key
-    let k = 0;
-    for (const e of G.enemies) {
-      if (e.type !== 'rival') continue;
-      if (k >= 5) { e.dead = true; continue; }
-      const a = -Math.PI / 2 + (k - 2) * 0.62, d = 190 + (k % 2) * 60;
-      e.dummy = true; e.x = e.hx = p.x + Math.cos(a) * d; e.y = e.hy = p.y + Math.sin(a) * d; e.hp = e.maxhp = 320; e.armor = 0; e.spawnT = 0; e.lvl = k % 3;
-      k++;
+    // the training ground: five sandbags in a ring out in the park, nobody else, every weapon on a key
+    for (let i = 0; i < 200; i++) {
+      const a = rand(TAU), d = rand(1500, 1900);
+      p.x = clamp(ARENA.w / 2 + Math.cos(a) * d, 320, ARENA.w - 320); p.y = clamp(ARENA.h / 2 + Math.sin(a) * d, 320, ARENA.h - 320);
+      if (isClear(p.x, p.y, 70) && !G.bosses.some((b) => dist(p.x, p.y, b.home.x + b.home.w / 2, b.home.y + b.home.h / 2) < 1000)) break;
+    }
+    for (let k = 0; k < 5; k++) {
+      const a = -Math.PI / 2 + (k - 2) * 0.62, d = 190 + (k % 2) * 60, e = spawnRival(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, k % 3);
+      e.dummy = true; e.hx = e.x; e.hy = e.y; e.hp = e.maxhp = 320; e.armor = 0;
     }
     p.weapon = 'keyboard'; p.tea = 6;
-  }
+  } else startRun();
   View.cam.x = p.x; View.cam.y = p.y;
   try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {}); } catch (e) { /* not available */ }
   UI.hide();
   if (training) banner(T('train_title'), T(Input.touch ? 'train_sub_touch' : 'train_sub'), 4.5, '#ffe14d');
-  else G.quest.showT = 6; // the first objective is announced large, in the middle of the screen
   Sfx.play('boss');
 }
 
+// kind: 'dead' (you keep half of what you carried) or 'clear' (all five signed: everything, plus a bonus)
 function endMatch(kind) {
-  const p = G.player, haul = p.loot.value, bonus = kind === 'winner' ? 20000 : 0;
+  const p = G.player, run = G.run, haul = p.loot.value, bonus = kind === 'clear' ? CLEAR_BONUS : 0;
+  const kept = !run ? 0 : kind === 'clear' ? haul + bonus : Math.round(haul * 0.5);
   G.state = 'over';
-  G.result = { kind, haul, bonus, place: kind === 'dead' ? aliveRivals() + 1 : 1, by: G.lastHit, time: G.time, kills: G.kills, signed: G.signed, counts: p.loot.counts.slice() };
-  if (kind !== 'dead') { Bank.money += haul + bonus; Bank.best = Math.max(Bank.best, haul + bonus); }
+  G.result = { kind, haul, bonus, kept, floor: run ? run.floor + 1 : 0, by: G.lastHit, time: G.time, kills: G.kills, signed: G.signed, counts: p.loot.counts.slice(), boons: Object.assign({}, p.boons) };
+  Bank.money += kept; Bank.best = Math.max(Bank.best, kept);
   Bank.runs++; Bank.save();
   Sfx.play(kind === 'dead' ? 'dead' : 'win');
   if (kind !== 'dead') burst(p.x, p.y, 40, 60, ['#7df0a0', '#ffe08a', '#fff', '#8fe8ff'], { sp: 320, up: 420, life: 1.4 });
@@ -101,34 +92,11 @@ function update(dt) {
   const wdt = G.slowT > 0 ? dt * 0.28 : dt;
   G.slowT = Math.max(0, G.slowT - dt);
   G.time += wdt;
-  if (G.training) G.zone.t = 999; // the circle never closes on the training ground
-  updateZone(wdt);
-  if (!G.exitsOpen && G.time >= 40 && !G.training) {
-    G.exitsOpen = true;
-    for (const e of G.exits) e.open = true;
-    banner(T('exit_open'), T('exit_open_sub'), 2.8, '#7df0a0');
-    Sfx.play('safe');
-  }
   updatePlayer(dt);
   if (G.state !== 'play') return;
 
-  // a CEO wakes when you get close to them, and stays on you until you leave their plaza
-  let near = null;
-  for (const b of G.bosses) {
-    const h = b.home, inside = p.x > h.x - 180 && p.x < h.x + h.w + 180 && p.y > h.y - 240 && p.y < h.y + h.h + 180;
-    if (!inside || b.down) b.aggro = false;
-    else if (dist(p.x, p.y, b.x, b.y) < 300) b.aggro = true;
-    if (b.aggro) near = b;
-    if (b !== G.boss) { b.t += dt; b.sayT -= dt; if (b.gone) runQueue(b, dt); } // a fired CEO still comes back if you wander off
-  }
-  if (near !== G.boss) {
-    if (G.boss) clearHazards();
-    G.boss = near;
-    if (near && !near.met) {
-      near.met = true;
-      startCine(near);
-    }
-  }
+  if (G.run) { updateRun(dt); if (G.state !== 'play' || G.cine) return; }
+  for (const b of G.bosses) if (b !== G.boss) b.t += dt;
   updateBullets(dt);
   updateUlts(dt);
   updateEnemies(wdt);
@@ -139,15 +107,10 @@ function update(dt) {
   updateContainers(dt);
   updatePickups(dt);
   updatePets(dt);
-  if (!G.training) updateQuest(dt);
+  if (G.run) updateQuest(dt);
   updateFx(dt);
   if (G.state !== 'play') return;
 
-  let inExit = false;
-  for (const e of G.exits) if (e.open && dist(p.x, p.y, e.x, e.y) < e.r) inExit = true;
-  if (inExit) { if ((G.exT += dt) >= 5) return endMatch('extract'); }
-  else G.exT = Math.max(0, G.exT - dt * 2);
-  if (aliveRivals() === 0) return endMatch('winner');
   // look a little ahead of where you are running, easing into it so changing direction does not swing the view
   const lk = 1 - Math.pow(0.08, dt), run = p.dashT > 0 || p.lungeT > 0 ? 0 : 0.11;
   G.lax = lerp(G.lax || 0, p.mvx * run, lk); G.lay = lerp(G.lay || 0, p.mvy * run * 0.8, lk);
@@ -604,7 +567,7 @@ function render() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, View.W, View.H);
 
-  if (G.cine) drawCine(); else if (G.state === 'play' || G.state === 'paused' || G.state === 'over') drawHUD();
+  if (G.cine) drawCine(); else if (G.state === 'play' || G.state === 'paused' || G.state === 'over' || G.state === 'boon') drawHUD();
 }
 
 // The darkened corners of the 2D view: a full-screen gradient is costly to fill every frame, so it is painted once,
@@ -655,11 +618,14 @@ function edgeArrow(wx, wy, color, label) {
 }
 
 function drawMinimap(x, y, s) {
-  const k = s / ARENA.w, z = G.zone, p = G.player;
+  const z = G.zone, p = G.player;
+  // in a run the map shows the floor you are on; otherwise the whole campus
+  const span = G.run ? (z.r + 50) * 2 : ARENA.w, ox = G.run ? z.x - span / 2 : 0, oy = G.run ? z.y - span / 2 : 0, k = s / span;
+  const X = (wx) => x + (wx - ox) * k, Y = (wy) => y + (wy - oy) * k;
   ctx.save();
   ctx.beginPath(); ctx.roundRect(x, y, s, s, 12); ctx.clip();
   // the map under the markers never changes: painted once per match and size, then copied
-  const M = G.map, mk = Math.round(s * DPR);
+  const M = G.map, mk = Math.round(s * DPR * (G.run ? 2.5 : 1));
   if (!M._mini || M._mini.width !== mk) {
     const cv = (M._mini = document.createElement('canvas')), c = cv.getContext('2d'), q0 = mk / ARENA.w;
     cv.width = cv.height = mk;
@@ -668,25 +634,31 @@ function drawMinimap(x, y, s) {
     for (const pa of M.paths) { c.beginPath(); for (const q of pa) c.lineTo(q[0] * q0, q[1] * q0); c.stroke(); }
     for (const o of M.ponds) { c.fillStyle = '#4aa8e6'; c.beginPath(); c.arc(o.x * q0, o.y * q0, o.r * q0, 0, TAU); c.fill(); }
     for (const pl of M.plazas) { c.fillStyle = pl.minor ? 'rgba(255,255,255,0.5)' : THEMES[pl.theme].wall; c.fillRect(pl.x * q0, pl.y * q0, pl.w * q0, pl.h * q0); }
+    for (const o of G.obstacles) if (o.bld) { c.fillStyle = '#2a2438'; c.fillRect(o.x * q0, o.y * q0, o.w * q0, o.d * q0); }
   }
-  ctx.drawImage(M._mini, x, y, s, s);
-  // storm
-  ctx.beginPath(); ctx.rect(x, y, s, s); ctx.arc(x + z.x * k, y + z.y * k, Math.max(z.r * k, 0.1), 0, TAU, true);
+  ctx.drawImage(M._mini, X(0), Y(0), ARENA.w * k, ARENA.h * k);
+  // the wall
+  ctx.beginPath(); ctx.rect(x, y, s, s); ctx.arc(X(z.x), Y(z.y), Math.max(z.r * k, 0.1), 0, TAU, true);
   ctx.fillStyle = 'rgba(140,50,190,0.55)'; ctx.fill('evenodd');
-  ctx.strokeStyle = '#f3c8ff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x + z.x * k, y + z.y * k, Math.max(z.r * k, 0.1), 0, TAU); ctx.stroke();
-  if (z.mode !== 'done' && z.nr > 0) {
-    ctx.setLineDash([4, 3]); ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.arc(x + z.nx * k, y + z.ny * k, z.nr * k, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
-  }
-  for (const b of G.bosses) {
-    const bx = x + (b.home.x + b.home.w / 2) * k, by = y + (b.home.y + b.home.h / 2) * k;
-    ctx.fillStyle = b.down ? '#7df0a0' : '#ff5a5f'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(bx, by - 6); ctx.lineTo(bx + 5, by); ctx.lineTo(bx, by + 6); ctx.lineTo(bx - 5, by); ctx.closePath(); ctx.fill(); ctx.stroke();
-  }
+  ctx.strokeStyle = '#f3c8ff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(X(z.x), Y(z.y), Math.max(z.r * k, 0.1), 0, TAU); ctx.stroke();
   for (const e of G.exits) {
-    ctx.fillStyle = e.open ? '#3fe08a' : '#cfcfcf'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.roundRect(x + e.x * k - 5, y + e.y * k - 4, 10, 8, 2); ctx.fill(); ctx.stroke();
+    if (!e.open) continue;
+    ctx.fillStyle = '#3fe08a'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(X(e.x) - 6, Y(e.y) - 5, 12, 10, 3); ctx.fill(); ctx.stroke();
   }
-  ctx.translate(x + p.x * k, y + p.y * k); ctx.rotate(p.aim);
+  // everyone still standing on this floor
+  for (const e of G.enemies) {
+    if (e.dead || e.asleep || e.dummy) continue;
+    ctx.fillStyle = e.type === 'rival' ? '#ff5a5f' : '#ffb0a0';
+    ctx.beginPath(); ctx.arc(X(e.x), Y(e.y), e.type === 'rival' ? 3 : 2.2, 0, TAU); ctx.fill();
+  }
+  const b = G.boss;
+  if (b && !b.gone) {
+    const bx = X(b.x), by = Y(b.y);
+    ctx.fillStyle = b.down ? '#7df0a0' : '#ff5a5f'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(bx, by - 7); ctx.lineTo(bx + 6, by); ctx.lineTo(bx, by + 7); ctx.lineTo(bx - 6, by); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  ctx.translate(X(p.x), Y(p.y)); ctx.rotate(p.aim);
   ctx.fillStyle = '#fff'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
   ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -5); ctx.lineTo(-2, 0); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.restore();
@@ -709,7 +681,7 @@ function drawHUD() {
   const mr = 27 * u, mcx = pad + mr, mcy = pad + mr, gx = pad + mr * 2 + 8 * u, gw = clamp(W * 0.26, 120 * u, 215 * u);
   plate(gx - 16 * u, pad + 3 * u, gw + 26 * u, (p.armor > 0 ? 52 : 42) * u, 12 * u);
   tube(gx, pad + 9 * u, gw, 16 * u, p.hp / p.maxhp, low && beat > 0.5 ? '#ff9aa6' : '#ff6a7c', '#d92b48', 5, low ? beat : 0);
-  tube(gx, pad + 30 * u, gw * 0.8, 8 * u, p.sta / 100, p.staFlash > 0 ? '#ff7a6a' : '#ffe27a', p.staFlash > 0 ? '#c9302c' : '#e0a51e', 0, 0);
+  tube(gx, pad + 30 * u, gw * 0.8 * Math.min(1.25, p.staMax / 100), 8 * u, p.sta / p.staMax, p.staFlash > 0 ? '#ff7a6a' : '#ffe27a', p.staFlash > 0 ? '#c9302c' : '#e0a51e', 0, 0);
   if (p.armor > 0) tube(gx, pad + 42 * u, gw * 0.6, 6 * u, p.armor / 100, '#a9d2ff', '#4a8fe0', 0, 0);
   knob(mcx, mcy, mr, TIER[WEAPONS[p.weapon].tier], false);
   ctx.save(); ctx.translate(mcx, mcy); ctx.scale(1.35 * u, 1.35 * u); ink(ctx, 1.6); drawWeapon(ctx, p.weapon, 1.2); ctx.restore();
@@ -737,9 +709,11 @@ function drawHUD() {
     ctx.fillStyle = INK; ctx.font = `900 ${Math.round(15 * u)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(done ? '✓' : '!', pad + 20 * u, qy + qh / 2 + 1);
     hudText(done ? T('qs_done') : qs.text, pad + 38 * u, qy + 14 * u, 14 * u, done ? '#7df0a0' : '#fff', 'left', 900);
     if (!done) {
-      for (let i = 0; i < qs.n; i++) { ctx.fillStyle = i < qs.cur ? '#ffe14d' : '#231d33'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(pad + 38 * u + i * 16 * u, qy + 26 * u, 12 * u, 9 * u, 3); ctx.fill(); ctx.stroke(); }
-      if (qs.reward === 'tea') { ctx.save(); ctx.translate(pad + qw - 30 * u, qy + 30 * u); ctx.scale(0.5 * u, 0.5 * u); drawLootIcon(ctx, { kind: 'tea' }); ctx.restore(); hudText('+1', pad + qw - 10 * u, qy + 31 * u, 12 * u, '#ffd0d6', 'right', 900); }
-      else if (qs.reward) { hudText('+' + qs.reward, pad + qw - 10 * u, qy + 31 * u, 12 * u, '#ffe08a', 'right', 900); coin(pad + qw - 16 * u - ctx.measureText('+' + qs.reward).width, qy + 30 * u, 6 * u); }
+      // one pip per enemy in the wave, filling as they go down; then what clearing it pays
+      const rw = qs.reward ? '✦ ' + T(qs.reward === 'boon2' ? 'qs_boon2_s' : 'qs_boon_s') : '';
+      if (rw) hudText(rw, pad + qw - 10 * u, qy + 31 * u, 12 * u, '#ffe08a', 'right', 900);
+      const room = qw - 48 * u - (rw ? ctx.measureText(rw).width + 8 * u : 0), step = Math.min(16 * u, room / Math.max(1, qs.n));
+      for (let i = 0; i < qs.n; i++) { ctx.fillStyle = i < qs.cur ? '#ffe14d' : '#231d33'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(pad + 38 * u + i * step, qy + 26 * u, Math.max(4, step - 4 * u), 9 * u, 3); ctx.fill(); ctx.stroke(); }
     }
     ly += qh + 8 * u;
   }
@@ -751,18 +725,16 @@ function drawHUD() {
 
   ctx.restore();
   ctx.save(); ctx.translate(-sf.r, sf.t);
-  // minimap in a bezel, with the headcount and the circle's clock as instruments under it (icons, not words)
-  const ms = miniSize(u), mx = W - pad - ms;
+  // minimap in a bezel; under it, who is still standing on this floor, your knock-outs, and how far up you are
+  const ms = miniSize(u), mx = W - pad - ms, run = G.run;
   plate(mx - 6, pad - 6, ms + 12, ms + 12 + 30 * u, 16);
   drawMinimap(mx, pad, ms);
-  const iy = pad + ms + 15 * u, shrink = z.mode === 'shrink';
-  glyph('person', mx + 12 * u, iy, 8 * u, '#fff');
-  hudText(String(aliveRivals() + (p.hp > 0 ? 1 : 0)), mx + 24 * u, iy + 1, 15 * u, '#fff', 'left', 900);
+  const iy = pad + ms + 15 * u;
+  glyph('person', mx + 12 * u, iy, 8 * u, '#ff9a9a');
+  hudText(String(run && run.stage === 'wave' ? run.left : G.boss && !G.boss.down ? 1 : 0), mx + 24 * u, iy + 1, 15 * u, '#ff9a9a', 'left', 900);
   glyph('ko', mx + ms * 0.36, iy, 7 * u, '#ffe08a');
   hudText(String(G.kills), mx + ms * 0.36 + 10 * u, iy + 1, 15 * u, '#ffe08a', 'left', 900);
-  const zt = z.mode === 'hold' ? fmtTime(Math.max(0, z.t)) : shrink ? '!!' : '--';
-  hudText(zt, W - pad - 3 * u, iy + 1, 13 * u * (shrink ? 1 + beat * 0.15 : 1), shrink ? '#ff9df0' : '#e9d5ff', 'right', 900);
-  glyph('ring', W - pad - 3 * u - ctx.measureText(zt).width - 9 * u, iy, 6 * u, shrink ? '#ff9df0' : '#e9d5ff');
+  if (run) hudText(T('hud_floor', run.floor + 1, FLOORS.length), W - pad - 3 * u, iy + 1, 13 * u, '#e9d5ff', 'right', 900);
 
   ctx.restore();
   // centre: the boss's health in a framed tube, and under it how close they are to toppling
@@ -774,14 +746,13 @@ function drawHUD() {
     tube(bx, cyTop + 20 * u, w, 14 * u, b.hp / b.maxhp, '#ff8a70', '#d9342b', 10, 0);
     tube(bx + w * 0.2, cyTop + 39 * u, w * 0.6, 5 * u, b.topple > 0 ? 1 : b.ko / b.koMax, '#fff3a0', '#ffc22e', 0, b.topple > 0 ? beat : 0);
   }
-  if (p.outside && G.state === 'play') hudText(T('hud_outside'), W / 2, H * 0.24, 20 * u * (1 + Math.sin(G.t * 8) * 0.04), '#f3b8ff', 'center', 900);
 
   // pointers
   if (G.state === 'play') {
-    if (p.outside) edgeArrow(z.x, z.y, '#f3b8ff', T('hud_safe'));
     // the way to the current objective: an arrow at the screen edge, or a marker over it once it is in view
     const qt = G.quest.tg, qn = G.quest.now;
-    if (qt && qn && qn.kind !== 'exit' && !p.outside) {
+    // (in a brawl the enemies come to you: only the last few stragglers, or ones far off, get a pointer)
+    if (qt && qn && !(qn.kind === 'fight' && G.run.left > 3 && dist(p.x, p.y, qt.x, qt.y) < 420)) {
       const qd = dist(p.x, p.y, qt.x, qt.y);
       if (!(qn.kind === 'boss' && G.boss) && qd > 150) {
         // a column of light on the target, and chevrons on the ground at your feet pointing the way
@@ -813,15 +784,10 @@ function drawHUD() {
         ctx.beginPath(); ctx.moveTo(sp.x - 11 * u, by - 16 * u); ctx.lineTo(sp.x + 11 * u, by - 16 * u); ctx.lineTo(sp.x, by); ctx.closePath(); ctx.fill(); ctx.stroke();
       }
     }
-    if (G.exitsOpen) {
-      let ex = null, xd = 1e9;
-      for (const e of G.exits) { const d = dist(p.x, p.y, e.x, e.y); if (d < xd) { xd = d; ex = e; } }
-      if (ex) edgeArrow(ex.x, ex.y, '#5df09a', T('hud_exit') + ' ' + Math.round(xd / 10) + 'm');
-    }
     if (G.exT > 0) {
       const w = Math.min(280 * u, W * 0.6);
-      hudText(T('hud_extract') + ' ' + Math.max(0, 5 - G.exT).toFixed(1), W / 2, H * 0.66, 16 * u, '#9df0b8', 'center', 900);
-      bar((W - w) / 2, H * 0.66 + 16 * u, w, 10 * u, G.exT / 5, '#3fe08a');
+      hudText(T('hud_board'), W / 2, H * 0.66, 16 * u, '#9df0b8', 'center', 900);
+      bar((W - w) / 2, H * 0.66 + 16 * u, w, 10 * u, G.exT / 1.5, '#3fe08a');
     }
     const kc = G.containers.find((k) => !k.opened && k.prog > 0);
     if (kc) {
@@ -835,14 +801,14 @@ function drawHUD() {
   // A new objective is announced large, in the upper middle of the screen, before it settles into its HUD slot.
   if (qs && q.showT > 0 && G.state === 'play') {
     const k = clamp(Math.min((q.showMax - q.showT) / 0.3, q.showT / 0.4), 0, 1), pop = 0.86 + 0.14 * k;
-    const tw = Math.min(W - 40, 470 * u) * pop, th = 104 * u * pop, tx = (W - tw) / 2, ty = H * 0.19 - th / 2 + sf.t;
+    const tw = Math.min(W - 40, 470 * u) * pop, th = 104 * u * pop, tx = (W - tw) / 2, ty = H * (narrow ? 0.31 : 0.19) - th / 2 + sf.t; // (on a narrow screen, below the map and the boss's bar)
     ctx.globalAlpha = k;
     plate(tx, ty, tw, th, 16 * u);
     ctx.fillStyle = '#ffe14d'; ctx.strokeStyle = INK; ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.roundRect(W / 2 - 54 * u, ty - 13 * u, 108 * u, 26 * u, 8 * u); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = INK; ctx.font = `900 ${Math.round(14 * u)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(T(q.i === 0 ? 'qs_first' : 'qs_next'), W / 2, ty + 1);
+    ctx.fillStyle = INK; ctx.font = `900 ${Math.round(14 * u)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(T(q.i <= 1 ? 'qs_first' : 'qs_next'), W / 2, ty + 1);
     hudText(qs.text, W / 2, ty + th * 0.44, Math.min(34 * u, (tw * 1.5) / Math.max(6, qs.text.length)) * pop, '#fff', 'center', 900);
-    const rw = qs.reward === 'tea' ? T('tea') + ' +1' : qs.reward ? '¥' + qs.reward : '';
+    const rw = qs.reward ? T(qs.reward === 'boon2' ? 'qs_boon2' : 'qs_boon') : '';
     if (rw) hudText(T('qs_reward', rw), W / 2, ty + th * 0.78, 15 * u * pop, '#ffe08a', 'center', 800);
     ctx.globalAlpha = 1;
   }
@@ -1136,7 +1102,7 @@ const qLabel = () => T('q_label', T(Settings.quality < 0 ? 'q_auto' : 'q_' + Set
 const optRow = () => `<div class="row">${canFull() ? `<button class="ghost" data-act="full">${T('full')}</button>` : ''}<button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="mode" ${R3.ok ? '' : 'disabled'}>${T(R3.on ? 'mode_3d' : 'mode_2d')}</button><button class="ghost" data-act="quality">${qLabel()}</button>${R3.on ? '' : `<button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button>`}</div>`;
 
 function showTitle() {
-  if (!G.map || G.state !== 'menu') { genWorld(); initZone(); G.player = makePlayer(); G.player.x = G.player.y = -9999; R3.build(); }
+  if (!G.map || G.state !== 'menu') { genWorld(); setArena(ARENA.w / 2, ARENA.h / 2, 3300); G.run = null; G.boss = null; G.player = makePlayer(); G.player.x = G.player.y = -9999; R3.build(); }
   G.state = 'menu'; G.result = null;
   UI.show(() => `
     <div class="kicker">${T('kicker')}</div>
@@ -1174,24 +1140,31 @@ function showKits() {
     <div class="bank"><i></i><b>${money(Bank.money)}</b></div>
     <button class="ghost" data-act="menu">${T('menu')}</button>`);
 }
+// the upgrades held, as a row of icons
+const boonRow = (boons) => { const ids = Object.keys(boons || {}); return ids.length ? `<p class="boonrow">${ids.map((id) => `<span title="${T('bn_' + id)}">${boonById(id).icon}${boons[id] > 1 ? `<b>${boons[id]}</b>` : ''}</span>`).join('')}</p>` : ''; };
+function showBoons() {
+  const o = G.run.offer, p = G.player;
+  UI.show(() => `
+    <div class="kicker">${T(o.gold ? 'boon_title2' : 'boon_title')}</div>
+    <div class="perks${o.gold ? ' gold' : ''}">${o.list.map((b, i) => `<button class="perk" data-act="boon" data-i="${i}"><span class="ic">${b.icon}</span><b>${T('bn_' + b.id)}</b><small>${T('bd_' + b.id)}</small><em>${o.gold ? '×2' : p.boons[b.id] ? 'Lv ' + (p.boons[b.id] + 1) : T('boon_new')}</em></button>`).join('')}</div>
+    ${boonRow(p.boons)}
+    ${Input.touch ? '' : `<p class="note">${T('boon_hint')}</p>`}`);
+}
 function showResult() {
   const r = G.result;
   if (!r || G.state !== 'over') return;
   const pips = r.counts.map((n, i) => (n ? `<span style="color:${TIER[i]}">■×${n}</span>` : '')).join(' ');
   const rows = [
-    ['st_haul', r.kind === 'dead' ? `<s>${money(r.haul)}</s>` : money(r.haul + r.bonus)],
-    ['st_place', r.kind === 'extract' ? T('st_extracted') : '#' + r.place + ' / ' + G.total],
+    ['st_haul', money(r.kept)], ['st_floor', r.floor + ' / ' + FLOORS.length],
     ['st_kills', r.kills], ['st_signed', r.signed + ' / 5'], ['st_time', fmtTime(r.time)], ['st_bank', money(Bank.money)],
   ];
   const head = r.kind === 'dead'
-    ? `<h1 class="red">${T('res_dead_title')}</h1><p class="story">${T('res_dead_sub', r.by || T('by_pve'))}</p>`
-    : r.kind === 'extract'
-      ? `<h1 class="green">${T('res_ex_title')}</h1><p class="story">${T('res_ex_sub')}</p>`
-      : `<h1 class="gold">${T('res_win_title')}</h1><p class="story">${T('res_win_sub', money(r.bonus))}</p>`;
+    ? `<h1 class="red">${T('res_dead_title')}</h1><p class="story">${T('res_dead_sub', r.by || T('by_pve'), money(r.kept))}</p>`
+    : `<h1 class="gold">${T('res_win_title')}</h1><p class="story">${T('res_win_sub', money(r.bonus))}</p>`;
   UI.show(() => `
     ${head}
-    ${r.kind !== 'dead' && r.signed >= 5 ? `<p class="story hi">${T('res_all_signed')}</p>` : ''}
     <div class="stats">${rows.map(([k, v]) => `<div><span>${T(k)}</span><b>${v}</b></div>`).join('')}</div>
+    ${boonRow(r.boons)}
     <p class="pips">${pips}</p>
     <button class="big" data-act="kits">${T('again')}</button>
     <button class="ghost" data-act="menu">${T('menu')}</button>
@@ -1202,6 +1175,7 @@ function showPause() {
   UI.show(() => `
     <h1>${T('paused')}</h1>
     <button class="big" data-act="resume">${T('resume')}</button>
+    ${boonRow(G.player.boons)}
     <div class="row"><button class="ghost" data-act="how2">${T('how')}</button>${G.training ? `<button class="ghost" data-act="weapon">${T('train_weapon', T('w_' + G.player.weapon))}</button>` : ''}</div>
     ${optRow()}
     <button class="ghost" data-act="menu">${T('quit')}</button>`);
@@ -1212,6 +1186,7 @@ function onAction(act, el) {
   Sfx.play('ui');
   if (act === 'kits') showKits();
   else if (act === 'kit') startMatch(KITS[+el.dataset.i]);
+  else if (act === 'boon') takeBoon(+el.dataset.i);
   else if (act === 'lang') { LANG.zh = !LANG.zh; UI.refresh(); }
   else if (act === 'mute') { Sfx.muted = !Sfx.muted; UI.refresh(); }
   else if (act === 'fx') { Settings.fx = !Settings.fx; Settings.save(); UI.refresh(); }
@@ -1297,8 +1272,8 @@ function frame(ts) {
   if (raw < 2 && G.state === 'play' && !G.cine) governor(raw); // (a gap over 2 s is a backgrounded tab, not a slow frame)
   lastTs = ts;
   G.t += dt;
-  // noon at the drop, golden hour by the last circle
-  const dayGoal = G.state === 'menu' ? 0.3 + Math.sin(G.t * 0.05) * 0.3 : clamp((G.time - 60) / 230, 0, 1);
+  // noon on the first floor, golden hour by the last
+  const dayGoal = G.state === 'menu' ? 0.3 + Math.sin(G.t * 0.05) * 0.3 : G.run ? clamp(G.run.floor * 0.22 + (G.boss ? 0.1 : 0), 0, 1) : 0.15;
   G.day = lerp(G.day, dayGoal, 0.02);
   if (G.state === 'play') {
     // hit-stop: the world freezes for a few frames on a solid hit
@@ -1310,6 +1285,7 @@ function frame(ts) {
     updateFx(dt);
     updateCamera(dt, ARENA.w / 2 + Math.sin(G.t * 0.07) * 1300, ARENA.h / 2 + Math.cos(G.t * 0.05) * 1100);
   } else if (G.state === 'over') updateFx(dt);
+  else if (G.state === 'boon') { updateFx(dt * 0.4); for (let i = 0; i < 3; i++) if (Input.take('Digit' + (i + 1))) takeBoon(i); }
   else if (G.state === 'paused' && Input.take('Escape')) { G.state = 'play'; UI.hide(); }
   if (c3.style.display !== (R3.on ? 'block' : 'none')) c3.style.display = R3.on ? 'block' : 'none';
   if (R3.on) {
@@ -1322,7 +1298,7 @@ function frame(ts) {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.clearRect(0, 0, View.W, View.H);
     if (G.flash) { ctx.fillStyle = `rgba(${G.flash.color},${G.flash.a * (G.flash.t / G.flash.max)})`; ctx.fillRect(0, 0, View.W, View.H); }
-    if (G.cine) drawCine(); else if (G.state === 'play' || G.state === 'paused' || G.state === 'over') { R3.overlay(); drawHUD(); }
+    if (G.cine) drawCine(); else if (G.state === 'play' || G.state === 'paused' || G.state === 'over' || G.state === 'boon') { R3.overlay(); drawHUD(); }
   } else render();
   requestAnimationFrame(frame);
 }
