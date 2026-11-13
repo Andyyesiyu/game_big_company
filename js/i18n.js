@@ -13,7 +13,6 @@ const STR = {
   bank: ['Severance fund', '赔偿金存款'],
   ctl_desktop: ['WASD move · Left-click attack (hold to charge a spin) · Space dodge · Right-click or Tab lock on · Q E R skills · F bubble tea · Esc pause', 'WASD 移动 · 左键攻击（按住蓄力回旋斩）· 空格闪避 · 右键或 Tab 锁定目标 · Q E R 技能 · F 喝奶茶 · Esc 暂停'],
   ctl_touch: ['Touch: left stick moves; tap attack to combo, hold it to charge; drag a skill button to aim it', '触屏：左摇杆移动；点普攻连击，按住蓄力；按住技能键拖动可瞄准'],
-  style_poly: ['Look: papercraft', '造型：纸模'], style_block: ['Look: blocks', '造型：方块'], style_model: ['Look: models', '造型：模型'],
   q_label: ['Quality: {0}', '画质：{0}'],
   q_auto: ['auto', '自动'], q_0: ['low', '低'], q_1: ['medium', '中'], q_2: ['high', '高'], q_3: ['ultra', '极高'],
   no_gpu: ['Hardware acceleration looks switched off in this browser, so the game is using the 2D view. Turn it on in the browser settings (System → use graphics acceleration) and reload for 3D.', '检测到浏览器没有开启硬件加速，已改用 2D 画面。在浏览器设置里打开"使用硬件加速 / 图形加速"后刷新，即可使用 3D。'],

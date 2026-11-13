@@ -17,7 +17,7 @@ function makeBoss(id, home) {
   const b = {
     id, def: d, home, x: home.x + home.w / 2, y: home.y + 130, z: 0, r: 24, hp: d.hp, maxhp: d.hp, t: rand(10), face: 1,
     q: [], busy: 0, cool: 1.6, phase: 1, flash: 0, say: null, sayT: 0, mode: 'orbit', orbitDir: pick([-1, 1]),
-    stun: 0, ko: 0, koMax: d.koMax || 150, topple: 0, last: -1, contactCd: 0, crowd: 0, kx: 0, ky: 0, charge: 0, reflect: 0, shield: null, data: {}, moving: false, met: false,
+    stun: 0, ko: 0, koMax: 150, topple: 0, last: -1, contactCd: 0, crowd: 0, kx: 0, ky: 0, charge: 0, reflect: 0, shield: null, data: {}, moving: false, met: false,
   };
   if (d.init) d.init(b);
   return b;
@@ -400,8 +400,7 @@ const BOSSES = {
 
   // Floor 5 — the safety-first final boss, escalating one ASL at a time.
   dario: {
-    // the boss in the middle of the map, and the hardest: more health, less rest between attacks, harder to topple
-    hp: 1900, speed: 116, dist: 340, rest: 0.6, phaseAt: [0.68, 0.36], koMax: 230,
+    hp: 1350, speed: 105, dist: 340, rest: 0.9, phaseAt: [0.68, 0.36],
     look: { top: '#3f6fb5', shirt: '#e3f2fd', bottom: '#2b2f3a', skin: '#efc7a6', hair: '#3b2a20', hairStyle: 'curly', glasses: '#263238', smile: true },
     init(b) { b.orbs = 3; b.orbA = 0; },
     tick(b, dt) { b.orbA += dt * 1.7; },
@@ -414,14 +413,14 @@ const BOSSES = {
     attacks: [
       [function rings(b) {
         say(b, T('q_da_rings'));
-        const waves = 3 + b.phase;
+        const waves = 2 + b.phase;
         for (let w = 0; w < waves; w++) {
           after(b, 0.3 + w * 0.62, () => {
             const n = 24, gap = rand(TAU);
             for (let k = 0; k < n; k++) {
               const a = (k / n) * TAU + w * 0.13;
               if (Math.abs(angDiff(a, gap)) < 0.45) continue;
-              eb(b.x, b.y, a, 215 + b.phase * 12, { shape: 'spark', dmg: 12, r: 8, color: '#ff8a50' });
+              eb(b.x, b.y, a, 200, { shape: 'spark', dmg: 10, r: 8, color: '#ff8a50' });
             }
             Sfx.play('shoot');
           });
@@ -432,7 +431,7 @@ const BOSSES = {
         say(b, T('q_da_essay'), 2.6);
         b.mode = 'still';
         const n = b.phase > 2 ? 3 : 2, base = aimP(b) + Math.PI / n, dir = pick([-1, 1]);
-        for (let k = 0; k < n; k++) laser(b, base + (k / n) * TAU, { da: dir * (0.62 + 0.1 * b.phase), tele: 0.8, life: 3.4, len: 950, width: 34, dmg: 17, look: 'essay' });
+        for (let k = 0; k < n; k++) laser(b, base + (k / n) * TAU, { da: dir * (0.55 + 0.1 * b.phase), tele: 0.9, life: 3.4, len: 950, width: 34, dmg: 14, look: 'essay' });
         Sfx.play('laser');
         after(b, 4.3, () => { b.mode = 'orbit'; });
         return 4.5;
@@ -443,7 +442,7 @@ const BOSSES = {
         for (let i = 0; i < 4; i++) {
           after(b, 0.4 + i * 0.5, () => {
             const a = aimP(b);
-            for (const k of b.phase > 1 ? [-0.4, -0.2, 0, 0.2, 0.4] : [-0.2, 0, 0.2]) eb(b.x, b.y, a + k, 290, { shape: 'spark', dmg: 12, r: 7, color: '#ffd180' });
+            for (const k of [-0.2, 0, 0.2]) eb(b.x, b.y, a + k, 270, { shape: 'spark', dmg: 10, r: 7, color: '#ffd180' });
             Sfx.play('shoot');
           });
         }
@@ -456,13 +455,12 @@ const BOSSES = {
           for (let i = 0; i < 5; i++) {
             for (let j = 0; j < 5; j++) {
               const x = ox + i * sp, y = oy + j * sp;
-              if ((i + j) % 2 === par && x > HOME.x && x < HOME.x + HOME.w && y > HOME.y && y < HOME.y + HOME.h) zone(x, y, 92, delay, { look: 'grid', dmg: 24 });
+              if ((i + j) % 2 === par && x > HOME.x && x < HOME.x + HOME.w && y > HOME.y && y < HOME.y + HOME.h) zone(x, y, 92, delay, { look: 'grid', dmg: 20 });
             }
           }
         };
-        lay(par, 1.1);
-        after(b, 0.95, () => lay(1 - par, 1.1));
-        if (b.phase > 2) after(b, 1.9, () => lay(par, 1.0)); // last phase: a third pass, back where the first one fell
+        lay(par, 1.25);
+        after(b, 1.05, () => lay(1 - par, 1.25));
         return 2.9;
       }, 2],
     ],

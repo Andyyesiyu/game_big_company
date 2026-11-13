@@ -232,11 +232,10 @@ R3.build = function () {
   this.scene.add(W);
 
   // --- ground: a painted colour map for the big shapes, multiplied by a tiling detail texture up close ---
-  // (blocky look: the map is painted small and left unfiltered, so the land is made of visible squares)
-  const pad = 600, size = ARENA.w + pad * 2, blocky = !this.models && Settings.style === 'block', CT = blocky ? 256 : 2048;
-  const colour = canvasTex(CT, CT, (g) => {
-    const k = CT / size;
-    g.fillStyle = '#b3a474'; g.fillRect(0, 0, CT, CT);
+  const pad = 600, size = ARENA.w + pad * 2;
+  const colour = canvasTex(2048, 2048, (g) => {
+    const k = 2048 / size;
+    g.fillStyle = '#b3a474'; g.fillRect(0, 0, 2048, 2048);
     g.setTransform(k, 0, 0, k, pad * k, pad * k);
     g.fillStyle = '#47803a'; g.beginPath(); g.roundRect(0, 0, ARENA.w, ARENA.h, 140); g.fill();
     for (const q of M.blobs) { g.fillStyle = q.c; g.beginPath(); g.arc(q.x, q.y, q.r, 0, TAU); g.fill(); }
@@ -248,8 +247,7 @@ R3.build = function () {
     for (const q of M.grass) { g.fillStyle = '#3b7630'; g.beginPath(); g.arc(q.x, q.y, q.r, 0, TAU); g.fill(); }
     for (const o of M.ponds) { g.fillStyle = '#5f5a40'; g.beginPath(); g.arc(o.x, o.y, o.r + 26, 0, TAU); g.fill(); }
   });
-  if (blocky) { colour.magFilter = THREE.NearestFilter; colour.minFilter = THREE.LinearFilter; colour.generateMipmaps = false; }
-  const detail = blocky ? canvasTex(16, 16, (g) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const v = 96 + ((Math.random() * 5) | 0) * 22; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, y, 1, 1); } }, true) : canvasTex(256, 256, (g) => {
+  const detail = canvasTex(256, 256, (g) => {
     g.fillStyle = '#808080'; g.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 5200; i++) {
       const v = 60 + Math.random() * 150 | 0;
@@ -258,7 +256,6 @@ R3.build = function () {
       g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * 7, y + Math.sin(a) * 7); g.stroke();
     }
   }, true);
-  if (blocky) detail.magFilter = THREE.NearestFilter;
   const gmat = std(0xffffff, { map: colour, roughness: 1 });
   gmat.onBeforeCompile = (sh) => {
     sh.uniforms.uDetail = { value: detail };
@@ -288,7 +285,7 @@ R3.build = function () {
 
   // --- flagstones along the dirt tracks ---
   if (M.stones.length) {
-    const st = new THREE.InstancedMesh(this.models ? new THREE.CylinderGeometry(1, 1.12, 1, 12) : Settings.style === 'block' ? new THREE.BoxGeometry(1.7, 1, 1.7) : new THREE.CylinderGeometry(1, 1.12, 1, 6), std(0xffffff, { roughness: 0.95, map: TEX.rock }), M.stones.length);
+    const st = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1.12, 1, 12), std(0xffffff, { roughness: 0.95, map: TEX.rock }), M.stones.length);
     st.receiveShadow = true;
     M.stones.forEach((s, i) => {
       m4.compose(this.v.set(s.x, 1.2, s.y), this.q.setFromAxisAngle(this.v2.set(0, 1, 0), s.rot), this.v2.set(s.rx, 5, s.ry));
@@ -306,11 +303,41 @@ R3.build = function () {
   // --- trees: one instanced trunk and a handful of instanced leaf clusters each ---
   const trees = G.obstacles.filter((o) => o.k === 'tree'), CL = 9, useM = !!this.models;
   this.trees = trees; this.leaf = null; this.treeInst = null;
+  if (trees.length && !useM) {
+    const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(5, 10, 78, 10), std(0x8a6444, { roughness: 1, map: TEX.bark }), trees.length);
+    const leaf = new THREE.InstancedMesh(lumpy(new THREE.SphereGeometry(1, 16, 12), 0.13), std(0xffffff, { roughness: 0.95, map: TEX.leaf }), trees.length * CL);
+    trunk.castShadow = leaf.castShadow = true; trunk.receiveShadow = leaf.receiveShadow = true;
+    trees.forEach((o, i) => {
+      m4.makeTranslation(o.x, 37, o.y); trunk.setMatrixAt(i, m4);
+      o._leaf = []; o._hide = 0;
+      for (let k = 0; k < CL; k++) {
+        const q = o.cl[k * 1 % o.cl.length], R = o.cr, dz = (((i * 31 + k * 17) % 11) / 11 - 0.5) * 1.3;
+        const s = (k === 0 ? 0.74 : q.r * 1.2) * R;
+        const pos = k === 0 ? [o.x, 72 + R * 0.75, o.y] : [o.x + q.dx * R * 1.1, 72 + R * 0.75 - q.dy * R * 0.95, o.y + dz * R];
+        o._leaf.push({ p: pos, s });
+        o._leaf[k].q = new THREE.Quaternion().setFromEuler(new THREE.Euler(k * 1.3, i * 0.7 + k * 2.1, k * 0.9));
+        m4.compose(this.v.set(pos[0], pos[1], pos[2]), o._leaf[k].q, this.v2.set(s, s * 0.86, s));
+        leaf.setMatrixAt(i * CL + k, m4);
+        const hgt = clamp(0.5 - q.dy * 0.7, 0, 1);
+        leaf.setColorAt(i * CL + k, col.set(o.pal[1]).lerp(new THREE.Color(hgt > 0.5 ? o.pal[2] : o.pal[0]), Math.abs(hgt - 0.5) * 1.1));
+      }
+    });
+    W.add(trunk, leaf);
+    this.trees = trees; this.leaf = leaf; this.CL = CL;
+  }
+
   // --- rocks ---
   const rocks = G.obstacles.filter((o) => o.k === 'rock');
   if (useM) this.modelNature(W, trees, rocks);
-  else if (Settings.style === 'block') this.blockNature(W, trees, rocks);
-  else this.polyNature(W, trees, rocks);
+  if (rocks.length && !useM) {
+    const rk = new THREE.InstancedMesh(lumpy(new THREE.SphereGeometry(1, 14, 10), 0.16, 2.2), std(0xffffff, { roughness: 0.95, map: TEX.rock }), rocks.length);
+    rk.castShadow = rk.receiveShadow = true;
+    rocks.forEach((o, i) => {
+      m4.compose(this.v.set(o.x, o.r * 0.45, o.y), this.q.setFromAxisAngle(this.v2.set(0, 1, 0), o.x * 0.01), this.v2.set(o.r * 1.05, o.r * 0.85, o.r * 0.95));
+      rk.setMatrixAt(i, m4); rk.setColorAt(i, col.set(['#8f8f88', '#7c7e78', '#9a978c'][i % 3]));
+    });
+    W.add(rk);
+  }
 
   // --- grass: tufts everywhere, tall blades in the hiding patches ---
   {

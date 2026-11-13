@@ -20,18 +20,16 @@ const Settings = {
   fx: true, auto: true, // auto: step down (3D -> 2D -> no lighting pass) by itself if this device can't keep up
   mode3d: true, forced3d: false, forcedFx: false,
   quality: -1, // 3D quality level 0..3, or -1 to let the game pick and adjust it
-  style: 'poly', // the 3D look: 'poly' (papercraft: big flat faces), 'block' (boxes and pixel skins) or 'model' (the downloaded models)
   load() {
     try { const v = localStorage.getItem('layoff_games_fx'); if (v !== null) this.fx = v === '1'; } catch (e) { /* ignore */ }
     if (/[?&]fx=0/.test(location.search)) this.fx = false;
     if (/[?&]fx=1/.test(location.search)) { this.fx = true; this.auto = false; this.forcedFx = true; }
     try { const v = localStorage.getItem('layoff_games_q'); if (v !== null) this.quality = clamp(+v || 0, -1, 3); } catch (e) { /* ignore */ }
-    try { const v = localStorage.getItem('layoff_games_look'); if (v === 'poly' || v === 'block' || v === 'model') this.style = v; } catch (e) { /* ignore */ }
     try { const v = localStorage.getItem('layoff_games_3d'); if (v !== null) this.mode3d = v === '1'; } catch (e) { /* ignore */ }
     if (/[?&]mode=2d/.test(location.search)) this.mode3d = false;
     if (/[?&]mode=3d/.test(location.search)) { this.mode3d = true; this.auto = false; this.forced3d = true; }
   },
-  save() { try { localStorage.setItem('layoff_games_fx', this.fx ? '1' : '0'); localStorage.setItem('layoff_games_3d', this.mode3d ? '1' : '0'); localStorage.setItem('layoff_games_q', String(this.quality)); localStorage.setItem('layoff_games_look', this.style); } catch (e) { /* ignore */ } },
+  save() { try { localStorage.setItem('layoff_games_fx', this.fx ? '1' : '0'); localStorage.setItem('layoff_games_3d', this.mode3d ? '1' : '0'); localStorage.setItem('layoff_games_q', String(this.quality)); } catch (e) { /* ignore */ } },
 };
 const money = (n) => '¥' + Math.round(n).toLocaleString('en-US');
 
@@ -1135,7 +1133,7 @@ const UI = {
 const fmtTime = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
 const canFull = () => Input.touch && !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
 const qLabel = () => T('q_label', T(Settings.quality < 0 ? 'q_auto' : 'q_' + Settings.quality));
-const optRow = () => `<div class="row">${canFull() ? `<button class="ghost" data-act="full">${T('full')}</button>` : ''}<button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="mode" ${R3.ok ? '' : 'disabled'}>${T(R3.on ? 'mode_3d' : 'mode_2d')}</button><button class="ghost" data-act="quality">${qLabel()}</button>${R3.on ? `<button class="ghost" data-act="style">${T('style_' + Settings.style)}</button>` : ''}${R3.on ? '' : `<button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button>`}</div>`;
+const optRow = () => `<div class="row">${canFull() ? `<button class="ghost" data-act="full">${T('full')}</button>` : ''}<button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="mode" ${R3.ok ? '' : 'disabled'}>${T(R3.on ? 'mode_3d' : 'mode_2d')}</button><button class="ghost" data-act="quality">${qLabel()}</button>${R3.on ? '' : `<button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button>`}</div>`;
 
 function showTitle() {
   if (!G.map || G.state !== 'menu') { genWorld(); initZone(); G.player = makePlayer(); G.player.x = G.player.y = -9999; R3.build(); }
@@ -1149,7 +1147,7 @@ function showTitle() {
     <div class="stamps">${['pony', 'yiming', 'elon', 'sam', 'dario'].map((id) => `<span class="${Bank.ceo.includes(id) ? 'on' : ''}">${shortName(id)}</span>`).join('')}</div>
     <div class="row"><button class="ghost" data-act="how">${T('how')}</button><button class="ghost" data-act="train">${T('train')}</button></div>
     ${optRow()}
-    ${R3.ok && R3.soft ? `<p class="note">${T('no_gpu')}</p>` : R3.on && Settings.style === 'model' && !R3.models && !R3.modelsFailed ? `<p class="note">${T('loading_models')}</p>` : ''}
+    ${R3.ok && R3.soft ? `<p class="note">${T('no_gpu')}</p>` : R3.on && !R3.models && !R3.modelsFailed ? `<p class="note">${T('loading_models')}</p>` : ''}
     <p class="disc">${T('disclaimer')}</p>`);
 }
 // Controls and rules as pictures of keys, not paragraphs.
@@ -1220,7 +1218,6 @@ function onAction(act, el) {
   else if (act === 'mode') { R3.on = Settings.mode3d = !R3.on; Settings.auto = false; Settings.save(); if (R3.on) { modelsArrived(); if (R3.stale) R3.build(); } resize(); UI.refresh(); }
   else if (act === 'quality') { Settings.quality = Settings.quality >= (R3.on ? 3 : 2) ? -1 : Settings.quality + 1; applyQuality(); Settings.save(); UI.refresh(); }
   else if (act === 'menu') showTitle();
-  else if (act === 'style') { Settings.style = { poly: 'block', block: 'model', model: 'poly' }[Settings.style]; Settings.save(); if (Settings.style === 'model') modelsArrived(); else { R3.models = null; R3.build(); } UI.refresh(); }
   else if (act === 'train') startMatch(KITS[0], true);
   else if (act === 'weapon') { cycleWeapon(); UI.refresh(); }
   else if (act === 'full') { const d = document, e = d.documentElement; try { if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d); else (e.requestFullscreen || e.webkitRequestFullscreen).call(e); } catch (er) { /* not allowed here */ } }
@@ -1374,10 +1371,8 @@ function boot() {
 // The model library is the last and by far the largest script on the page. The game is already running on its
 // built-in shapes by the time it arrives; swap them for the models as soon as they have decoded.
 function modelsArrived() {
-  // only the 'model' look of the 3D view needs them: they are decoded if and when that is what is showing
-  if (!R3.on || Settings.style !== 'model') return;
-  if (R3.lib) { if (!R3.models) { R3.models = R3.lib; R3.build(); } return; }
-  R3.loadModels(() => { R3.lib = R3.models; if (Settings.style !== 'model') R3.models = null; R3.build(); if (UI.cur && G.state === 'menu') UI.refresh(); });
+  if (!R3.on) return; // the 2D view has no use for them: they are loaded if and when 3D is switched on
+  R3.loadModels(() => { R3.build(); if (UI.cur && G.state === 'menu') UI.refresh(); });
 }
 // The canvases and menu container are above the scripts in the page, so there is nothing to wait for.
 boot();
