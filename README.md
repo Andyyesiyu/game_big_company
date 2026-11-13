@@ -26,8 +26,8 @@ node tools/build-standalone.js
 | | PC | Phone |
 |---|---|---|
 | Move | WASD / arrow keys | left stick |
-| Light attack | left-click (hold to charge) | big red button (hold to charge) |
-| Heavy attack | right-click | orange button |
+| Light attack | left-click (hold to charge) | the big red button (hold to charge) |
+| Heavy attack | right-click | keep tapping the red button: the string runs on into the launcher and the slam |
 | Dodge roll | Space (no direction held = roll backwards) | dodge button |
 | Lock on | Tab or middle-click | automatic (nearest target) |
 | Skills | Q, E (or Shift), R; aimed at your lock or the cursor | skill buttons: tap to auto-aim, or drag to aim |
@@ -64,6 +64,15 @@ buttons that branch, a stamina bar, and big monsters you can knock over.
   rivals will press you at once.
 - Rivals fight in melee too. A red wedge on the ground shows where a swing is about to
   land; senior rivals telegraph a dash strike with a red line. Step out or dodge.
+
+On a phone the screen is laid out for thumbs from the first frame, in either orientation:
+one attack button in the corner with dodge and the three skills fanned around it, bubble
+tea at the bottom, pause by the minimap. The HUD keeps clear of notches and home bars,
+menus shrink to fit a phone on its side, the 3D view renders fewer pixels and a smaller
+shadow map, and the screen is kept awake during a match.
+
+Camera effects are deliberately restrained: ordinary hits lean the camera slightly, only
+heavy hits shake it, and the view eases into a small look-ahead as you run.
 
 English and 中文 are both built in (toggle on the title screen).
 

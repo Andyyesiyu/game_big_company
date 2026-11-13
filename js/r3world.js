@@ -95,7 +95,7 @@ R3.init = function (canvas) {
     this.hemi = new THREE.HemisphereLight(0xd6ecff, 0x55663a, 0.5);
     const sun = (this.sun = new THREE.DirectionalLight(0xfff1d6, 1.0));
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(Input.touch ? 1024 : 2048, Input.touch ? 1024 : 2048);
     const sc = sun.shadow.camera;
     sc.left = -820; sc.right = 820; sc.top = 820; sc.bottom = -820; sc.near = 100; sc.far = 3600;
     sun.shadow.bias = -0.0005; sun.shadow.normalBias = 2.5;
@@ -104,7 +104,7 @@ R3.init = function (canvas) {
     this.dyn = new THREE.Group();
     scene.add(this.dyn);
     // the world renders to an off-screen target first, then one full-screen pass adds glow, sun shafts and the grade
-    this.rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 });
+    this.rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: Input.touch ? 2 : 4 });
     this.postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.postMat = new THREE.ShaderMaterial({
       uniforms: { tD: { value: this.rt.texture }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: this.uTime, uDay: { value: 0 }, uSlow: { value: 0 }, uOut: { value: 0 } },
@@ -162,7 +162,7 @@ R3.init = function (canvas) {
 
 R3.resize = function (w, h, dpr) {
   if (!this.ok) return;
-  const pr = Math.min(dpr, 1.5);
+  const pr = Math.min(dpr, Input.touch ? 1.25 : 1.5); // phones: fewer pixels, the screen is dense anyway
   this.r.setPixelRatio(pr);
   this.r.setSize(w, h, false);
   this.rt.setSize(Math.round(w * pr), Math.round(h * pr));
@@ -417,9 +417,10 @@ R3.unproject = function (px, py, z = 0) {
 };
 R3.col3 = new THREE.Vector3();
 R3.updateCamera = function () {
-  const zoom = 1 - View.zk * 1.6, portrait = View.W < View.H;
+  const zoom = 1 - View.zk * 1.6 * CAM.zoom, portrait = View.W < View.H;
   const D = (portrait ? 700 : 540) * zoom, pitch = 0.56;
-  const tx = View.cam.x - View.kx * 1.4 + rand(-1, 1) * View.shake * 0.9, ty = View.cam.y - View.ky * 2 + rand(-1, 1) * View.shake * 0.9;
+  const sh = View.shake * 0.9 * CAM.shake;
+  const tx = View.cam.x - View.kx * 1.4 * CAM.kick + Math.sin(G.t * 53) * sh, ty = View.cam.y - View.ky * 2 * CAM.kick + Math.cos(G.t * 41) * sh;
   this.v.set(tx, D * Math.sin(pitch), ty + D * Math.cos(pitch)); this.v2.set(tx, 34, ty - 110);
   const c = G.cine;
   if (c) {

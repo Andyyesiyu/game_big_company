@@ -56,6 +56,7 @@ function startMatch(kit) {
   Object.assign(G, { state: 'play', time: 0, kills: 0, signed: 0, exT: 0, exitsOpen: false, result: null, lastHit: '', cine: null });
   G.quest = { i: 0, base: 0, doneT: 0, scan: 0, now: null, tg: null };
   View.cam.x = p.x; View.cam.y = p.y;
+  try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {}); } catch (e) { /* not available */ }
   UI.hide();
   banner(T('drop_title', G.total), T('drop_sub'), 3.2, '#ffe08a');
   Sfx.play('boss');
@@ -78,7 +79,7 @@ function playerDie() {
 }
 
 function update(dt) {
-  if (Input.take('Escape') || Input.take('KeyP') || Input.take('pauseBtn')) return showPause();
+  if (Input.take('Escape') || Input.take('KeyP') || Input.take('btn_pause')) return showPause();
   const p = G.player;
   // perfect dodge: the world runs slow, you don't
   const wdt = G.slowT > 0 ? dt * 0.28 : dt;
@@ -130,7 +131,10 @@ function update(dt) {
   if (inExit) { if ((G.exT += dt) >= 5) return endMatch('extract'); }
   else G.exT = Math.max(0, G.exT - dt * 2);
   if (aliveRivals() === 0) return endMatch('winner');
-  updateCamera(dt, p.x + p.mvx * 0.2, p.y + p.mvy * 0.16);
+  // look a little ahead of where you are running, easing into it so changing direction does not swing the view
+  const lk = 1 - Math.pow(0.08, dt), run = p.dashT > 0 || p.lungeT > 0 ? 0 : 0.11;
+  G.lax = lerp(G.lax || 0, p.mvx * run, lk); G.lay = lerp(G.lay || 0, p.mvy * run * 0.8, lk);
+  updateCamera(dt, p.x + G.lax, p.y + G.lay);
 }
 
 // ---------- the boss's entrance ----------
@@ -147,7 +151,7 @@ function updateCine(dt) {
   const c = G.cine;
   c.t += dt; c.b.t += dt;
   // any button skips it
-  if (c.t > 0.5 && c.t < c.dur - 0.4 && (Input.take('lclick') | Input.take('Space') | Input.take('btn_atk') | Input.take('Escape') | Input.take('KeyJ'))) c.t = c.dur - 0.4;
+  if (c.t > 0.5 && c.t < c.dur - 0.4 && (Input.take('lclick') | Input.take('Space') | Input.take('tap') | Input.take('Escape') | Input.take('KeyJ'))) c.t = c.dur - 0.4;
   updateCamera(dt, lerp(G.player.x, c.b.x, cineK()), lerp(G.player.y, c.b.y - 30, cineK()));
   updateFx(dt * 0.3);
   if (c.t < c.dur) return;
@@ -173,7 +177,7 @@ function drawCine() {
 }
 
 function updateCamera(dt, tx, ty) {
-  const k = 1 - Math.pow(0.002, dt);
+  const k = 1 - Math.pow(0.006, dt); // soft enough to swallow attack lunges without a jolt
   View.cam.x = lerp(View.cam.x, tx, k); View.cam.y = lerp(View.cam.y, ty, k);
 }
 
@@ -443,7 +447,7 @@ function drawPickup(k) {
 }
 
 function render() {
-  View.S = View.S0 * (1 + View.zk) * (1 + cineK() * 0.55);
+  View.S = View.S0 * (1 + View.zk * CAM.zoom) * (1 + cineK() * 0.55);
   const S = View.S, p = G.player, t = G.t;
   // with the lighting pass on, the world goes to an offscreen canvas and through the shader
   const fx = Post.ok && Settings.fx;
@@ -453,7 +457,8 @@ function render() {
   ctx = fx ? sctx : hctx;
   ctx.setTransform(rd, 0, 0, rd, 0, 0);
   ctx.globalAlpha = 1;
-  View.ox = rand(-1, 1) * View.shake - View.kx; View.oy = rand(-1, 1) * View.shake - View.ky; // the camera lunges with the blow
+  // shake is a quick smooth wobble rather than per-frame noise; the camera also leans a little with each blow
+  View.ox = Math.sin(G.t * 53) * View.shake * CAM.shake - View.kx * CAM.kick; View.oy = Math.cos(G.t * 41) * View.shake * CAM.shake - View.ky * CAM.kick;
   setSun(G.day);
   drawTerrain(G.map, t);
   for (const e of G.exits) if (onScreen(e.x, e.y, 320)) drawExit(e, t);
@@ -648,7 +653,7 @@ function drawMinimap(x, y, s) {
 
 function drawHUD() {
   const W = View.W, H = View.H, p = G.player, z = G.zone;
-  const u = clamp(Math.min(W, H) / 720, 0.72, 1.25), narrow = W < 760, pad = 14 * u;
+  const u = hudU(), narrow = W < (Input.touch ? 600 : 760), pad = 14 * u, sf = View.safe;
   const low = G.state === 'play' && p.hp > 0 && p.hp <= p.maxhp * 0.35, beat = 0.5 + 0.5 * Math.sin(G.t * 9);
   if (low) {
     // running low: the edges of the screen throb red
@@ -656,6 +661,7 @@ function drawHUD() {
     vg.addColorStop(0, 'rgba(255,40,60,0)'); vg.addColorStop(1, `rgba(255,40,60,${0.2 + beat * 0.22})`);
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
+  ctx.save(); ctx.translate(sf.l, sf.t);
   // status: a weapon medallion, then glass gauges for health, stamina and the plaid shirt
   const mr = 27 * u, mcx = pad + mr, mcy = pad + mr, gx = pad + mr * 2 + 8 * u, gw = clamp(W * 0.26, 120 * u, 215 * u);
   plate(gx - 16 * u, pad + 3 * u, gw + 26 * u, (p.armor > 0 ? 52 : 42) * u, 12 * u);
@@ -697,11 +703,13 @@ function drawHUD() {
   if (p.hidden) { hudText(T('hud_hidden'), pad, ly, 11 * u, '#b9f59a'); ly += 18 * u; }
   // kill feed
   ly += 4 * u;
-  for (const f of G.feed) { ctx.globalAlpha = clamp(f.t, 0, 1); hudText(f.text, pad, ly, 10.5 * u, f.color, 'left', 700); ly += 15 * u; }
+  for (const f of Input.touch ? G.feed.slice(-2) : G.feed) { ctx.globalAlpha = clamp(f.t, 0, 1); hudText(f.text, pad, ly, 10.5 * u, f.color, 'left', 700); ly += 15 * u; }
   ctx.globalAlpha = 1;
 
+  ctx.restore();
+  ctx.save(); ctx.translate(-sf.r, sf.t);
   // minimap in a bezel, with the headcount and the circle's clock as instruments under it (icons, not words)
-  const ms = clamp(150 * u, 104, 190), mx = W - pad - ms;
+  const ms = miniSize(u), mx = W - pad - ms;
   plate(mx - 6, pad - 6, ms + 12, ms + 12 + 30 * u, 16);
   drawMinimap(mx, pad, ms);
   const iy = pad + ms + 15 * u, shrink = z.mode === 'shrink';
@@ -713,8 +721,9 @@ function drawHUD() {
   hudText(zt, W - pad - 3 * u, iy + 1, 13 * u * (shrink ? 1 + beat * 0.15 : 1), shrink ? '#ff9df0' : '#e9d5ff', 'right', 900);
   glyph('ring', W - pad - 3 * u - ctx.measureText(zt).width - 9 * u, iy, 6 * u, shrink ? '#ff9df0' : '#e9d5ff');
 
+  ctx.restore();
   // centre: the boss's health in a framed tube, and under it how close they are to toppling
-  const b = G.boss, cyTop = narrow ? pad + ms + 64 * u : pad + 4 * u;
+  const b = G.boss, cyTop = sf.t + (narrow ? pad + ms + 64 * u : pad + 4 * u);
   if (b && !b.gone && !b.down) {
     const w = narrow ? W - pad * 2 - 20 : Math.min(W * 0.36, 460), bx = (W - w) / 2;
     plate(bx - 14 * u, cyTop + 12 * u, w + 28 * u, 38 * u, 12 * u);
@@ -799,16 +808,24 @@ function bubbleAt(px, py, text) {
 
 // One layout shared by drawing and touch hit-testing.
 // Phone: a thumb cluster in the bottom-right corner. PC: a bar with the key under each skill.
+// HUD scale: a little larger on a phone, where the screen is small but close.
+const hudU = () => clamp(Math.min(View.W, View.H) / 720, Input.touch ? 0.8 : 0.72, 1.25);
+// the minimap gives way on a small phone so the gauges, the pause button and the skill fan all fit
+const miniSize = (u) => { const s = clamp(150 * u, 104, 190); return Input.touch ? Math.max(84, Math.min(s, View.W * 0.3, View.H * 0.27)) : s; };
 function skillButtons() {
-  const W = View.W, H = View.H;
+  const W = View.W, H = View.H, sf = View.safe, u = hudU();
   if (Input.touch) {
+    // Phone: one attack button in the corner with dodge and the three skills fanned around it,
+    // bubble tea out of the way at the bottom, pause up by the minimap.
+    const k = clamp(Math.min(W, H) / 390, 0.85, 1.2), R = W - sf.r, B = H - Math.max(sf.b, 6);
+    const at = (id, x, y, r) => ({ id, x: R - x * k, y: B - y * k, r: r * k });
+    const ms = miniSize(u);
     return [
-      { id: 'atk', x: W - 78, y: H - 92, r: 44 }, { id: 'hvy', x: W - 172, y: H - 62, r: 32 }, { id: 'd', x: W - 160, y: H - 150, r: 27 },
-      { id: 'q', x: W - 76, y: H - 190, r: 26 }, { id: 'e', x: W - 252, y: H - 92, r: 26 }, { id: 'r', x: W - 238, y: H - 172, r: 29 },
-      { id: 'tea', x: W - 34, y: H - 262, r: 22 },
+      at('atk', 76, 84, 43), at('d', 180, 56, 27), at('q', 170, 138, 25), at('e', 109, 189, 25), at('r', 36, 186, 27), at('tea', 252, 40, 22),
+      { id: 'pause', x: R - 14 * u - ms - 30, y: sf.t + 14 * u + 16, r: 17 },
     ];
   }
-  const u = clamp(Math.min(W, H) / 720, 0.72, 1.25), gap = 68 * u, y = H - 58 * u, x0 = W / 2 - gap * 2;
+  const gap = 68 * u, y = H - 58 * u, x0 = W / 2 - gap * 2;
   const keys = { q: 'Q', e: 'E', r: 'R', d: '␣', tea: 'F' };
   return ['q', 'e', 'r', 'd', 'tea'].map((id, i) => ({ id, x: x0 + i * gap + (i > 2 ? 14 * u : 0), y, r: (id === 'r' ? 30 : i > 2 ? 23 : 27) * u, key: keys[id] }));
 }
@@ -937,12 +954,17 @@ function drawSkills(u) {
   const p = G.player, low = p.hp > 0 && p.hp <= p.maxhp * 0.35 && G.state === 'play', beat = 0.5 + 0.5 * Math.sin(G.t * 9);
   const FACE = { r: '#f2b01e', hvy: '#ff8a3c', atk: '#ff5a6e', tea: '#ffd0d6', e: '#e8f6ff', q: '#fff6e0', d: '#f1eefb' };
   for (const b of skillButtons()) {
+    if (b.id === 'pause') {
+      plate(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2, 9);
+      ctx.fillStyle = '#fff'; ctx.fillRect(b.x - 6, b.y - 7, 4, 14); ctx.fillRect(b.x + 2, b.y - 7, 4, 14);
+      continue;
+    }
     const max = b.id === 'tea' ? 1 : SKILL_CD[b.id] || 1, cd = b.id === 'tea' ? Math.max(0, p.teaCd) : b.id === 'atk' || b.id === 'hvy' ? 0 : p.cd[b.id];
     const short = (b.id === 'd' && p.sta < DODGE_COST) || (b.id === 'hvy' && p.sta < 12);
     const ready = cd <= 0 && !short && (b.id !== 'tea' || p.tea > 0), urge = b.id === 'tea' && low && p.tea > 0;
     const r = b.r * (urge ? 1.08 + beat * 0.12 : 1);
     if (urge) { ctx.save(); ctx.shadowColor = '#ff3b55'; ctx.shadowBlur = 16 + beat * 22; ctx.fillStyle = '#ff3b55'; ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, TAU); ctx.fill(); ctx.restore(); }
-    knob(b.x, b.y, r, ready ? FACE[b.id] : '#4a4560', Input.keys['btn_' + b.id]);
+    knob(b.x, b.y, r, ready ? FACE[b.id] : '#4a4560', Input.held(b.id));
     ctx.save(); ctx.translate(b.x, b.y); ctx.scale(r / 29, r / 29); ctx.globalAlpha = ready ? 1 : 0.5; drawSkillIcon(ctx, b.id); ctx.restore();
     if (ready) gloss(b.x, b.y, r * 0.82);
     if (cd > 0) {
@@ -966,8 +988,17 @@ function drawSkills(u) {
   }
   if (low) {
     // the one thing to do right now, spelled out
-    const y = Input.touch ? View.H - 330 : View.H * 0.7, s = 1 + beat * 0.06;
-    if (p.tea > 0) {
+    const tb = Input.touch && skillButtons().find((b) => b.id === 'tea');
+    const y = tb ? tb.y - tb.r - 30 : View.H * 0.7, s = 1 + beat * 0.06;
+    if (tb) {
+      // on a phone the prompt sits right on top of the button it is about
+      const tx = T(p.tea > 0 ? 'hud_drink_touch' : 'hud_notea');
+      ctx.font = `900 ${Math.round(17 * u)}px ${FONT}`;
+      const tw = ctx.measureText(tx).width, col = p.tea > 0 ? '#ff8fa0' : '#ffb0bc', sz = 17 * u * (p.tea > 0 ? s : 1);
+      // beside the button when there is room (a phone on its side), otherwise just above it
+      if (tb.x - tb.r - 14 - tw > View.safe.l + 8) hudText(tx, tb.x - tb.r - 14, tb.y, sz, col, 'right', 900);
+      else hudText(tx, clamp(tb.x - 16, tw / 2 + 8 + View.safe.l, View.W - tw / 2 - 8), y, sz, col, 'center', 900);
+    } else if (p.tea > 0) {
       const tx = T(Input.touch ? 'hud_drink_touch' : 'hud_drink');
       ctx.font = `900 ${Math.round(22 * u * s)}px ${FONT}`;
       const w = ctx.measureText(tx).width + (Input.touch ? 0 : 44 * u);
@@ -980,12 +1011,23 @@ function drawSkills(u) {
 // ---------- menus (DOM overlay) ----------
 const UI = {
   el: null, cur: null,
-  show(fn) { this.cur = fn; this.el.innerHTML = `<div class="card">${fn()}</div>`; this.el.classList.add('on'); },
+  show(fn) { this.cur = fn; this.el.innerHTML = `<div class="card">${fn()}</div>`; this.el.classList.add('on'); this.fit(); },
+  // shrink the sheet until it fits the screen (a phone on its side is very short), wider when there is room
+  fit() {
+    const c = this.el && this.el.firstElementChild;
+    if (!c) return;
+    const wide = innerWidth > innerHeight * 1.25 && innerHeight < 560;
+    c.style.zoom = 1; c.style.width = wide ? '760px' : '';
+    const z = clamp((innerHeight - 64) / (c.offsetHeight + 30), 0.5, 1);
+    c.style.zoom = z;
+    if (wide) c.style.width = Math.min(760, (innerWidth - 70) / z) + 'px';
+  },
   hide() { this.cur = null; this.el.classList.remove('on'); this.el.innerHTML = ''; },
   refresh() { if (this.cur) this.show(this.cur); },
 };
 const fmtTime = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
-const optRow = () => `<div class="row"><button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="mode" ${R3.ok ? '' : 'disabled'}>${T(R3.on ? 'mode_3d' : 'mode_2d')}</button>${R3.on ? '' : `<button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button>`}</div>`;
+const canFull = () => Input.touch && !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+const optRow = () => `<div class="row">${canFull() ? `<button class="ghost" data-act="full">${T('full')}</button>` : ''}<button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="mode" ${R3.ok ? '' : 'disabled'}>${T(R3.on ? 'mode_3d' : 'mode_2d')}</button>${R3.on ? '' : `<button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button>`}</div>`;
 
 function showTitle() {
   if (!G.map || G.state !== 'menu') { genWorld(); initZone(); G.player = makePlayer(); G.player.x = G.player.y = -9999; R3.build(); }
@@ -1003,15 +1045,17 @@ function showTitle() {
 }
 // Controls and rules as pictures of keys, not paragraphs.
 const HOW_KEYS = [['WASD', 'k_move'], ['␣', 'k_dodge'], ['@L', 'k_light'], ['@R', 'k_heavy'], ['@L', 'k_charge'], ['Tab', 'k_lock'], ['Q E R', 'k_skill'], ['F', 'k_tea']];
+const HOW_TOUCH = [['@M', 'kt_move'], ['@D', 'k_dodge'], ['@A', 'k_light'], ['@A', 'k_charge'], ['@S', 'kt_skill'], ['@T', 'k_tea']];
 const HOW_COMBOS = [['LLL', 'c_chop'], ['LLH', 'c_upper'], ['HH', 'c_slam'], ['␣L', 'c_dash']];
 let howBack = 'menu';
 function showHow() {
-  const key = (k) => k.split(' ').map((x) => (x === '@L' ? `<kbd class="l">${T('m_l')}</kbd>` : x === '@R' ? `<kbd class="h">${T('m_r')}</kbd>` : `<kbd>${x}</kbd>`)).join('');
+  const TK = { '@M': '<kbd>◎</kbd>', '@D': '<kbd>▷</kbd>', '@A': '<kbd class="l">●</kbd>', '@S': '<kbd>✦</kbd>', '@T': `<kbd>${T('tea_short')}</kbd>` };
+  const key = (k) => k.split(' ').map((x) => TK[x] || (x === '@L' ? `<kbd class="l">${T('m_l')}</kbd>` : x === '@R' ? `<kbd class="h">${T('m_r')}</kbd>` : `<kbd>${x}</kbd>`)).join('');
   const seq = (q) => [...q].map((ch) => (ch === 'L' ? '<kbd class="l">●</kbd>' : ch === 'H' ? '<kbd class="h">◆</kbd>' : `<kbd>${ch}</kbd>`)).join('');
   UI.show(() => `
     <div class="kicker">${T('how')}</div>
-    <div class="keys">${HOW_KEYS.map(([k, t]) => `<div>${key(k)}<span>${T(t)}</span></div>`).join('')}</div>
-    <div class="keys combos">${HOW_COMBOS.map(([q, t]) => `<div>${seq(q)}<span>${T(t)}</span></div>`).join('')}</div>
+    <div class="keys">${(Input.touch ? HOW_TOUCH : HOW_KEYS).map(([k, t]) => `<div>${key(k)}<span>${T(t)}</span></div>`).join('')}</div>
+    <div class="keys combos${Input.touch ? ' one' : ''}">${(Input.touch ? [['LLLHH', 'kt_string'], ['▷L', 'c_dash']] : HOW_COMBOS).map(([q, t]) => `<div>${seq(q)}<span>${T(t)}</span></div>`).join('')}</div>
     <ul class="rules"><li>${T('rule_a')}</li><li>${T('rule_b')}</li><li>${T('rule_c')}</li></ul>
     <button class="ghost" data-act="${howBack}">${T('back')}</button>`);
 }
@@ -1065,6 +1109,7 @@ function onAction(act, el) {
   else if (act === 'fx') { Settings.fx = !Settings.fx; Settings.save(); UI.refresh(); }
   else if (act === 'mode') { R3.on = Settings.mode3d = !R3.on; Settings.auto = false; Settings.save(); UI.refresh(); }
   else if (act === 'menu') showTitle();
+  else if (act === 'full') { const d = document, e = d.documentElement; try { if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d); else (e.requestFullscreen || e.webkitRequestFullscreen).call(e); } catch (er) { /* not allowed here */ } }
   else if (act === 'how') { howBack = 'menu'; showHow(); }
   else if (act === 'how2') { howBack = 'pause'; showHow(); }
   else if (act === 'pause') showPause();
@@ -1075,6 +1120,10 @@ function onAction(act, el) {
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   View.W = innerWidth; View.H = innerHeight;
+  // notches and home bars: the HUD keeps clear of them
+  const cs = getComputedStyle(document.getElementById('safe')), px = (v) => parseFloat(v) || 0;
+  View.safe = { t: px(cs.paddingTop), r: px(cs.paddingRight), b: px(cs.paddingBottom), l: px(cs.paddingLeft) };
+  UI.fit();
   SDPR = Math.min(DPR, 1.5);
   canvas.width = Math.round(View.W * DPR); canvas.height = Math.round(View.H * DPR);
   for (const c of [sceneCv, glCv]) { c.width = Math.round(View.W * SDPR); c.height = Math.round(View.H * SDPR); }
@@ -1153,12 +1202,6 @@ function boot() {
     for (const b of skillButtons()) if (dist(x, y, b.x, b.y) < b.r + 8) return b.id;
     return null;
   };
-  for (const [id, key] of [['tb-pause', 'pauseBtn']]) {
-    const el = document.getElementById(id);
-    const press = (e) => { e.preventDefault(); Input.pressed[key] = true; };
-    el.addEventListener('touchstart', press, { passive: false });
-    el.addEventListener('mousedown', press);
-  }
   canvas.addEventListener('pointerdown', () => Sfx.init());
   document.addEventListener('visibilitychange', () => { if (document.hidden && G.state === 'play') showPause(); });
   View.cam.x = ARENA.w / 2; View.cam.y = ARENA.h / 2;

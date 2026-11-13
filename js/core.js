@@ -67,7 +67,11 @@ const Input = {
     }
     return null;
   },
+  // is a finger down on this on-screen button right now?
+  held(id) { for (const k in this.btn) if (this.btn[k].id === id) return true; return false; },
   init(canvas) {
+    // a phone or tablet: lay the screen out for thumbs from the first frame, not after the first touch
+    try { if (matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches) { this.touch = true; document.body.classList.add('touch'); } } catch (e) { /* old browser */ }
     addEventListener('keydown', (e) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
       if (!this.keys[e.code]) this.pressed[e.code] = true;
@@ -90,7 +94,7 @@ const Input = {
     // Skill buttons fire on release, so you can drag one to aim it first.
     const tstart = (e) => {
       e.preventDefault();
-      this.touch = true;
+      this.touch = true; this.pressed.tap = true;
       document.body.classList.add('touch');
       for (const t of e.changedTouches) {
         const id = this.hitButton ? this.hitButton(t.clientX, t.clientY) : null;

@@ -493,9 +493,9 @@ function hitTarget(t, dmg, o) {
   if (big) { ring(t.x, t.y, 56, '#fff', 0.2); G.flash = { color: '255,255,255', t: 0.07, max: 0.07, a: 0.14 }; }
   // freeze, then shove the camera along the blow and punch the zoom
   G.hitstop = Math.max(G.hitstop, o.heavy ? 0.12 : crit ? 0.1 : 0.06);
-  View.kx += Math.cos(a) * (big ? 13 : 5.5); View.ky += Math.sin(a) * YK * (big ? 13 : 5.5);
+  View.kx += Math.cos(a) * (big ? 13 : 4); View.ky += Math.sin(a) * YK * (big ? 13 : 4);
   View.zk = Math.max(View.zk, big ? 0.05 : 0.014);
-  View.shake = Math.max(View.shake, o.heavy ? 8 : crit ? 6 : 2.5);
+  View.shake = Math.max(View.shake, o.heavy ? 8 : crit ? 5 : 0); // ordinary hits lean the camera but do not shake it
   t.hitAt = G.t;
   G.combo++; G.comboT = 2.6;
   Sfx.play(big ? 'hit2' : 'hit', G.combo);
@@ -545,6 +545,15 @@ function nextHeavy(p) {
   if (p.mvId === 'thrust' || p.mvId === 'upper' || p.mvId === 'l3') return 'slam';
   return p.chain >= 2 ? 'upper' : 'thrust';
 }
+// A phone has one attack button, so there the string carries on by itself into the heavy moves:
+// sweep, sweep, chop, launcher, slam, for as long as there is stamina to pay for them.
+function nextTouch(p) {
+  if (p.afterDash <= 0 && p.chainT > 0) {
+    if (p.mvId === 'l3' && p.sta >= MOVES.upper.cost) return 'upper';
+    if (p.mvId === 'upper' && p.sta >= MOVES.slam.cost) return 'slam';
+  }
+  return nextLight(p);
+}
 function spend(p, n) {
   if (p.sta < n) { p.staFlash = 0.4; if (p.denyT <= 0) { p.denyT = 0.4; Sfx.play('ui'); } return false; }
   p.sta -= n; p.staT = 0.7;
@@ -578,7 +587,6 @@ function resolveSwing(p) {
   const w = WEAPONS[p.weapon], m = p.mv || MOVES.l1, a = p.swingA, ctr = p.counterT > 0;
   const reach = w.reach * m.reach, dmg = w.dmg * m.dmg * (ctr ? 1.6 : 1);
   let landed = false;
-  View.kx += Math.cos(a) * 2; View.ky += Math.sin(a) * 1.2; // even a whiff nudges the camera
   if (m.kind === 'slam') {
     // comes down in front of you and hits everything around the impact
     const cx = p.x + Math.cos(a) * reach * 0.5, cy = p.y + Math.sin(a) * reach * 0.5, R = reach * 0.95;
@@ -724,7 +732,11 @@ function updatePlayer(dt) {
   }
   if (p.buf > 0) {
     p.buf -= dt;
-    if (idle && p.swingT <= 0 && p.charge < CHARGE_AT[0]) { p.buf = 0; if (!Input.touch) aimCursor(); startSwing(p); }
+    if (idle && p.swingT <= 0 && p.charge < CHARGE_AT[0]) {
+      p.buf = 0;
+      if (!Input.touch) { aimCursor(); startSwing(p); }
+      else { const id = nextTouch(p); if (MOVES[id].cost) spend(p, MOVES[id].cost); startMove(p, id); }
+    }
   }
   if (atkHeld && idle) {
     if ((p.hold += dt) > 0.18 && p.sta > 0) {
@@ -1432,7 +1444,7 @@ function updateFx(dt) {
   }
   G.corpses = G.corpses.filter((c) => !c.dead);
   G.boomCd -= dt;
-  View.shake = Math.max(0, View.shake - dt * 30);
+  View.shake = Math.max(0, View.shake - dt * 42);
   // the camera kick and zoom punch spring back fast
   const kd = Math.pow(1e-6, dt);
   View.kx *= kd; View.ky *= kd; View.zk *= Math.pow(1e-4, dt);

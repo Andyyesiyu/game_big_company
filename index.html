@@ -80,6 +80,8 @@
   .keys div { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .keys span { font-size: 15px; font-weight: 800; }
   .keys.combos { padding-top: 16px; border-top: 3px dashed #cfc8dc; }
+  .keys.one { grid-template-columns: 1fr; }
+  .keys span { min-width: 4em; }
   .rules { text-align: left; margin: 0 auto 18px; padding-left: 20px; max-width: 500px; font-size: 14px; line-height: 1.5; color: #4a4360; }
   .rules li { margin: 5px 0; }
 
@@ -103,13 +105,11 @@
   @media (max-width: 520px) { .perks { grid-template-columns: 1fr; } .perk { flex-direction: row; text-align: left; padding: 10px 14px; gap: 10px; } .perk .ic { font-size: 28px; } .perk small { flex: 1; } .stats { grid-template-columns: repeat(2, 1fr); } .keys { grid-template-columns: 1fr; } }
   @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
 
-  #touch { display: none; }
-  body.touch #touch { display: block; }
-  #touch button { position: fixed; width: 62px; height: 62px; font-size: 24px; border: 2.5px solid var(--ink); border-radius: 12px;
-    background: linear-gradient(#ffffff, #e4dfee); box-shadow: inset 0 2px 0 #fff, 0 3px 0 #a39cb8, 0 3px 0 2.5px var(--ink); }
-  #touch button:active { transform: translateY(2px); }
-  #tb-pause { right: max(12px, env(safe-area-inset-right)); top: calc(232px + env(safe-area-inset-top)); width: 40px !important; height: 40px !important; font-size: 15px !important; }
-  #ui.on ~ #touch { display: none !important; }
+  #safe { position: fixed; inset: 0; visibility: hidden; pointer-events: none;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  @media (max-width: 440px) { .stamps { gap: 5px; } .stamps span { width: 48px; height: 48px; font-size: 11px; border-width: 2.5px; } .stamps span.on { border-width: 4px; }
+    .kicker { font-size: 11px; letter-spacing: 0.08em; } .card { padding: 36px 16px 20px; } }
+  @media (max-height: 560px) { #ui { padding: 30px 12px 12px; } }
 </style>
 </head>
 <body>
@@ -117,9 +117,7 @@
 <canvas id="gl"></canvas>
 <canvas id="cv"></canvas>
 <div id="ui"></div>
-<div id="touch">
-  <button id="tb-pause" aria-label="Pause">⏸</button>
-</div>
+<div id="safe"></div>
 <script src="vendor/three.min.js"></script>
 <script src="vendor/GLTFLoader.js"></script>
 <script src="vendor/SkeletonUtils.js"></script>
