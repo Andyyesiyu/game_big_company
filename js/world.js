@@ -507,7 +507,6 @@ function hitTarget(t, dmg, o) {
   View.kx += Math.cos(a) * (big ? 13 : 4) * F.kick; View.ky += Math.sin(a) * YK * (big ? 13 : 4) * F.kick;
   View.zk = Math.max(View.zk, (big ? 0.05 : 0.014) * F.zoom);
   View.shake = Math.max(View.shake, (o.heavy ? 8 : crit ? 5 : F.lightShake) * F.shake);
-  if (o.heavy && F.id === 'b') ring(t.x, t.y, 74, '#d9c98f', 0.32); // the heavy tuning kicks up dust
   t.hitAt = G.t;
   t.recoil = Math.max(t.recoil || 0, (big ? 0.6 : 0.34) * F.recoil); // they snap back from the blow (3D rigs lean with it)
   G.combo++; G.comboT = 2.6;
@@ -529,28 +528,15 @@ function hitTarget(t, dmg, o) {
 }
 
 // ---------- how a hit feels ----------
-// Three tunings of the same moves, to compare by hand (V switches, the pause menu too). Each one changes
-// the things you feel on the moves you use most: how fast a swing comes out and how soon the next can start,
-// how long the world freezes on contact, how far the target is thrown and how hard it recoils, how much the
-// camera reacts, and whether a finishing blow drops into a breath of slow motion.
+// The tuning for the moves you use most ("sharp": a long lunge in, big trails, the camera pushing in rather
+// than shaking, a short beat of slow motion after a heavy hit). Every number is independent.
 //   speed  swing time multiplier          at      shifts when in the swing the blow lands
 //   cancel how much of the swing can be cut short by the next attack once the blow has landed
 //   stop   hit-stop seconds for a light hit, a crit, a heavy hit
 //   kick / shake / zoom  camera reaction   kb / flinch  knockback and stagger   recoil  how far they snap back
 //   lunge / lungeT  how far and how fast you close the gap   impact  slow motion after a heavy hit, seconds
 //   sparks / trail / flash  size of the effects   pitch  pitch of the hit sound   lightShake  shake on a light hit
-const FEELS = [
-  { id: 'a', speed: 0.84, at: -0.05, cancel: 0.32, stop: [0.035, 0.065, 0.08], kick: 0.8, shake: 0.6, zoom: 0.8, kb: 0.65, flinch: 0.2, recoil: 0.7, lunge: 1.15, lungeT: 0.07, impact: 0, sparks: 1.3, trail: 1.0, flash: 0.09, pitch: 1.22, lightShake: 0 },
-  { id: 'b', speed: 1.14, at: 0.04, cancel: 0.06, stop: [0.085, 0.13, 0.19], kick: 1.5, shake: 1.6, zoom: 1.3, kb: 1.4, flinch: 0.36, recoil: 1.5, lunge: 0.9, lungeT: 0.11, impact: 0.26, sparks: 1.0, trail: 1.25, flash: 0.15, pitch: 0.8, lightShake: 2.2 },
-  { id: 'c', speed: 0.95, at: -0.02, cancel: 0.2, stop: [0.06, 0.1, 0.12], kick: 0.6, shake: 0.45, zoom: 1.7, kb: 1.0, flinch: 0.27, recoil: 1.0, lunge: 1.4, lungeT: 0.08, impact: 0.13, sparks: 1.7, trail: 1.6, flash: 0.12, pitch: 1.0, lightShake: 0 },
-];
-let FEEL = FEELS[0];
-function setFeel(i, quiet) {
-  FEEL = FEELS[((i % FEELS.length) + FEELS.length) % FEELS.length];
-  try { localStorage.setItem('layoff_games_feel', FEEL.id); } catch (e) { /* ignore */ }
-  if (!quiet && G.state === 'play') { banner(T('feel_' + FEEL.id), T('feel_' + FEEL.id + '_d'), 1.6, '#ffe14d'); Sfx.play('ui'); }
-}
-try { const v = localStorage.getItem('layoff_games_feel'), k = FEELS.findIndex((f) => f.id === v); if (k >= 0) FEEL = FEELS[k]; } catch (e) { /* ignore */ }
+const FEEL = { speed: 0.95, at: -0.02, cancel: 0.2, stop: [0.06, 0.1, 0.12], kick: 0.6, shake: 0.45, zoom: 1.7, kb: 1.0, flinch: 0.27, recoil: 1.0, lunge: 1.4, lungeT: 0.08, impact: 0.13, sparks: 1.7, trail: 1.6, flash: 0.12, pitch: 1.0, lightShake: 0 };
 
 // ---------- the moveset ----------
 // Light attacks string together, and a heavy attack branches off wherever you are in the string:
@@ -828,7 +814,6 @@ function updatePlayer(dt) {
     Sfx.play('warn');
   }
   if (Input.take('KeyF') | Input.take('btn_tea')) useTea();
-  if (Input.take('KeyV') | Input.take('btn_feel')) setFeel(FEELS.indexOf(FEEL) + 1);
   if (G.training && Input.take('KeyB')) cycleWeapon();
 
   if (p.castT > 0) p.castT -= dt;

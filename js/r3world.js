@@ -217,6 +217,9 @@ function disposeTree(o) {
 
 R3.build = function () {
   if (!this.ok || !G.map) return;
+  // nothing to build while the 2D view is showing: do it when (if) 3D is switched on
+  if (!this.on) { this.stale = true; return; }
+  this.stale = false;
   surfaceTextures();
   if (this.world) { this.scene.remove(this.world); disposeTree(this.world); }
   for (const [, R] of this.ents) this.dyn.remove(R.g);

@@ -470,7 +470,7 @@ function render() {
   View.S = View.S0 * (1 + View.zk * CAM.zoom) * (1 + cineK() * 0.55);
   const S = View.S, p = G.player, t = G.t;
   // with the lighting pass on, the world goes to an offscreen canvas and through the shader
-  const fx = Post.ok && Settings.fx;
+  const fx = Post.ok && Settings.fx && Q2D.level > 0;
   if (glCv.style.display !== (fx ? 'block' : 'none')) glCv.style.display = fx ? 'block' : 'none';
   const rd = fx ? SDPR : DPR;
   RENDER.k = S * rd;
@@ -560,9 +560,10 @@ function render() {
 
   if (G.zone) drawStorm(G.zone, t);
 
-  // wind
+  // wind and drifting motes of light: atmosphere, skipped at the plainest level
   ctx.strokeStyle = '#fff'; ctx.lineCap = 'round';
-  for (const w of G.wind) {
+  const air = Q2D.level > 0;
+  if (air) for (const w of G.wind) {
     const u = w.t / w.life, x0 = (w.x + u * 0.12) * View.W - (View.cam.x - w.cx) * S, y0 = w.y * View.H - (View.cam.y - w.cy) * S * YK, len = w.len * View.W;
     ctx.globalAlpha = Math.sin(u * Math.PI) * 0.5; ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.moveTo(x0, y0);
@@ -571,7 +572,7 @@ function render() {
   }
   // motes of light drifting in the air
   ctx.globalCompositeOperation = 'lighter';
-  for (const q of G.motes) {
+  if (air) for (const q of G.motes) {
     const u = (((q.x + Math.sin(t * 0.7 + q.ph) * 0.012 - (View.cam.x * S) / View.W) % 1) + 1) % 1, y = (((q.y + Math.sin(t * 0.4 + q.ph) * 0.03 - (View.cam.y * S * YK) / View.H) % 1) + 1) % 1, a = 0.4 + Math.sin(t * 1.6 + q.ph) * 0.35;
     ctx.globalAlpha = a * 0.35; ctx.fillStyle = '#d8ff8a';
     ctx.beginPath(); ctx.arc(u * View.W, y * View.H, q.s * 2.8, 0, TAU); ctx.fill();
@@ -597,12 +598,24 @@ function render() {
     ctx.clearRect(0, 0, View.W, View.H);
   } else {
     if (G.slowT > 0) { ctx.fillStyle = `rgba(90,150,255,${0.22 * clamp(G.slowT * 2, 0, 1)})`; ctx.fillRect(0, 0, View.W, View.H); }
-    const vg = ctx.createRadialGradient(View.W / 2, View.H / 2, Math.min(View.W, View.H) * 0.5, View.W / 2, View.H / 2, Math.max(View.W, View.H) * 0.85);
-    vg.addColorStop(0, 'rgba(40,30,90,0)'); vg.addColorStop(1, 'rgba(40,30,90,0.3)');
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, View.W, View.H);
+    if (air) ctx.drawImage(vignette(), 0, 0, View.W, View.H);
   }
 
   if (G.cine) drawCine(); else if (G.state === 'play' || G.state === 'paused' || G.state === 'over') drawHUD();
+}
+
+// The darkened corners of the 2D view: a full-screen gradient is costly to fill every frame, so it is painted once,
+// small, and stretched.
+let vigCv = null, vigKey = '';
+function vignette() {
+  const key = View.W + 'x' + View.H;
+  if (vigCv && vigKey === key) return vigCv;
+  vigCv = vigCv || document.createElement('canvas'); vigKey = key;
+  const w = (vigCv.width = 256), h = (vigCv.height = Math.max(64, Math.round((256 * View.H) / View.W))), c = vigCv.getContext('2d');
+  const vg = c.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.5, w / 2, h / 2, Math.max(w, h) * 0.85);
+  vg.addColorStop(0, 'rgba(40,30,90,0)'); vg.addColorStop(1, 'rgba(40,30,90,0.3)');
+  c.fillStyle = vg; c.fillRect(0, 0, w, h);
+  return vigCv;
 }
 
 // ---------- HUD ----------
@@ -882,7 +895,6 @@ function skillButtons() {
     return [
       at('atk', 76, 84, 43), at('d', 180, 56, 27), at('q', 170, 138, 25), at('e', 109, 189, 25), at('r', 36, 186, 27), at('tea', 252, 40, 22),
       { id: 'pause', x: R - 14 * u - ms - 30, y: sf.t + 14 * u + 16, r: 17 },
-      { id: 'feel', x: sf.l + 12 * u + 50 * u, y: H - Math.max(sf.b, 6) - 21 * u, r: 0, hit: 44 },
     ];
   }
   const gap = 68 * u, y = H - 58 * u, x0 = W / 2 - gap * 2;
@@ -1014,7 +1026,6 @@ function drawSkills(u) {
   const p = G.player, low = p.hp > 0 && p.hp <= p.maxhp * 0.35 && G.state === 'play', beat = 0.5 + 0.5 * Math.sin(G.t * 9);
   const FACE = { r: '#f2b01e', hvy: '#ff8a3c', atk: '#ff5a6e', tea: '#ffd0d6', e: '#e8f6ff', q: '#fff6e0', d: '#f1eefb' };
   for (const b of skillButtons()) {
-    if (b.id === 'feel') continue; // drawn as the chip below
     if (b.id === 'pause') {
       plate(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2, 9);
       ctx.fillStyle = '#fff'; ctx.fillRect(b.x - 6, b.y - 7, 4, 14); ctx.fillRect(b.x + 2, b.y - 7, 4, 14);
@@ -1042,15 +1053,10 @@ function drawSkills(u) {
       ctx.fillStyle = '#fff'; ctx.font = `900 ${Math.round(12 * u)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(p.tea), bx, by + 0.5);
     }
   }
-  {
-    // which tuning is on, and how to change it (bottom-left; on a phone it is a button)
-    const sf = View.safe, tx = T('feel_' + FEEL.id);
-    ctx.font = `900 ${Math.round(12 * u)}px ${FONT}`;
-    const w = ctx.measureText(tx).width + (Input.touch ? 24 : 54) * u, x = sf.l + 12 * u, y = View.H - Math.max(sf.b, 6) - 34 * u;
-    plate(x, y, w, 26 * u, 9 * u);
-    hudText(tx, x + 11 * u, y + 13.5 * u, 12 * u, '#ffe14d', 'left', 900);
-    if (!Input.touch) keycap(x + w - 18 * u, y + 11 * u, 'V', u * 0.85, false);
-    if (G.training && !Input.touch) { plate(x + w + 8 * u, y, 96 * u, 26 * u, 9 * u); hudText(T('w_' + p.weapon), x + w + 18 * u, y + 13.5 * u, 11 * u, '#fff', 'left', 800); keycap(x + w + 86 * u, y + 11 * u, 'B', u * 0.85, false); }
+  if (G.training && !Input.touch) {
+    // training ground: which weapon is out, and the key that steps through them
+    const sf = View.safe, x = sf.l + 12 * u, y = View.H - Math.max(sf.b, 6) - 34 * u;
+    plate(x, y, 104 * u, 26 * u, 9 * u); hudText(T('w_' + p.weapon), x + 11 * u, y + 13.5 * u, 11 * u, '#fff', 'left', 800); keycap(x + 88 * u, y + 11 * u, 'B', u * 0.85, false);
   }
   if (!Input.touch) {
     // left of the bar: which mouse button is the light attack and which the heavy
@@ -1099,7 +1105,7 @@ const UI = {
 const fmtTime = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
 const canFull = () => Input.touch && !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
 const qLabel = () => T('q_label', T(Settings.quality < 0 ? 'q_auto' : 'q_' + Settings.quality));
-const optRow = () => `<div class="row">${canFull() ? `<button class="ghost" data-act="full">${T('full')}</button>` : ''}<button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="mode" ${R3.ok ? '' : 'disabled'}>${T(R3.on ? 'mode_3d' : 'mode_2d')}</button>${R3.on ? `<button class="ghost" data-act="quality">${qLabel()}</button>` : ''}${R3.on ? '' : `<button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button>`}</div>`;
+const optRow = () => `<div class="row">${canFull() ? `<button class="ghost" data-act="full">${T('full')}</button>` : ''}<button class="ghost" data-act="lang">${T('lang')}</button><button class="ghost" data-act="mute">${T(Sfx.muted ? 'sound_off' : 'sound_on')}</button><button class="ghost" data-act="mode" ${R3.ok ? '' : 'disabled'}>${T(R3.on ? 'mode_3d' : 'mode_2d')}</button><button class="ghost" data-act="quality">${qLabel()}</button>${R3.on ? '' : `<button class="ghost" data-act="fx" ${Post.ok ? '' : 'disabled'}>${T(!Post.ok ? 'fx_na' : Settings.fx ? 'fx_on' : 'fx_off')}</button>`}</div>`;
 
 function showTitle() {
   if (!G.map || G.state !== 'menu') { genWorld(); initZone(); G.player = makePlayer(); G.player.x = G.player.y = -9999; R3.build(); }
@@ -1168,7 +1174,7 @@ function showPause() {
   UI.show(() => `
     <h1>${T('paused')}</h1>
     <button class="big" data-act="resume">${T('resume')}</button>
-    <div class="row"><button class="ghost" data-act="how2">${T('how')}</button><button class="ghost" data-act="feel">${T('feel_btn', T('feel_' + FEEL.id))}</button>${G.training ? `<button class="ghost" data-act="weapon">${T('train_weapon', T('w_' + G.player.weapon))}</button>` : ''}</div>
+    <div class="row"><button class="ghost" data-act="how2">${T('how')}</button>${G.training ? `<button class="ghost" data-act="weapon">${T('train_weapon', T('w_' + G.player.weapon))}</button>` : ''}</div>
     ${optRow()}
     <button class="ghost" data-act="menu">${T('quit')}</button>`);
 }
@@ -1181,11 +1187,10 @@ function onAction(act, el) {
   else if (act === 'lang') { LANG.zh = !LANG.zh; UI.refresh(); }
   else if (act === 'mute') { Sfx.muted = !Sfx.muted; UI.refresh(); }
   else if (act === 'fx') { Settings.fx = !Settings.fx; Settings.save(); UI.refresh(); }
-  else if (act === 'mode') { R3.on = Settings.mode3d = !R3.on; Settings.auto = false; Settings.save(); UI.refresh(); }
-  else if (act === 'quality') { Settings.quality = Settings.quality >= 3 ? -1 : Settings.quality + 1; Gov.cap = 3; Gov.good = 0; Gov.before = 0; Gov.locked = false; R3.setQuality(Settings.quality < 0 ? (Input.touch ? 1 : 2) : Settings.quality); Settings.save(); UI.refresh(); }
+  else if (act === 'mode') { R3.on = Settings.mode3d = !R3.on; Settings.auto = false; Settings.save(); if (R3.on) { modelsArrived(); if (R3.stale) R3.build(); } resize(); UI.refresh(); }
+  else if (act === 'quality') { Settings.quality = Settings.quality >= (R3.on ? 3 : 2) ? -1 : Settings.quality + 1; applyQuality(); Settings.save(); UI.refresh(); }
   else if (act === 'menu') showTitle();
   else if (act === 'train') startMatch(KITS[0], true);
-  else if (act === 'feel') { setFeel(FEELS.indexOf(FEEL) + 1, true); UI.refresh(); }
   else if (act === 'weapon') { cycleWeapon(); UI.refresh(); }
   else if (act === 'full') { const d = document, e = d.documentElement; try { if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d); else (e.requestFullscreen || e.webkitRequestFullscreen).call(e); } catch (er) { /* not allowed here */ } }
   else if (act === 'how') { howBack = 'menu'; showHow(); }
@@ -1196,13 +1201,14 @@ function onAction(act, el) {
 
 // ---------- boot ----------
 function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  // in 3D this canvas only carries the HUD, so it stays sharp; in 2D it follows the quality level
+  DPR = Math.min(window.devicePixelRatio || 1, R3.on ? 2 : Q2D.dpr[Q2D.level]);
   View.W = innerWidth; View.H = innerHeight;
   // notches and home bars: the HUD keeps clear of them
   const cs = getComputedStyle(document.getElementById('safe')), px = (v) => parseFloat(v) || 0;
   View.safe = { t: px(cs.paddingTop), r: px(cs.paddingRight), b: px(cs.paddingBottom), l: px(cs.paddingLeft) };
   UI.fit();
-  SDPR = Math.min(DPR, 1.5);
+  SDPR = Math.min(DPR, Q2D.sdpr[Q2D.level]);
   canvas.width = Math.round(View.W * DPR); canvas.height = Math.round(View.H * DPR);
   for (const c of [sceneCv, glCv]) { c.width = Math.round(View.W * SDPR); c.height = Math.round(View.H * SDPR); }
   R3.resize(View.W, View.H, DPR);
@@ -1220,7 +1226,7 @@ function governor(raw) {
   const fps = Gov.n / Gov.t;
   Gov.n = 0; Gov.t = 0;
   if (R3.on) {
-    if (Settings.quality >= 0) { if (fps < 14 && Settings.auto) { R3.on = false; } return; } // a level chosen by hand is left alone
+    if (Settings.quality >= 0) { if (fps < 14 && Settings.auto) { R3.on = false; resize(); } return; } // a level chosen by hand is left alone
     if (Gov.locked) return;
     // A drop that changed nothing means the browser itself is holding the rate down (a 30 fps power-saving
     // mode, say), not the graphics: put the level back and stop adjusting.
@@ -1229,10 +1235,33 @@ function governor(raw) {
     if (fps < 42) {
       Gov.good = 0;
       if (R3.ql > 0) { Gov.cap = R3.ql - 1; Gov.before = fps; R3.setQuality(R3.ql - 1); }
-      else if (fps < 20 && Settings.auto) R3.on = false;
+      else if (fps < 20 && Settings.auto) { R3.on = false; resize(); }
     } else if (fps > 57 && R3.ql < Math.min(Gov.cap, Input.touch ? 2 : 3)) { if (++Gov.good >= 4) { Gov.good = 0; R3.setQuality(R3.ql + 1); } }
     else Gov.good = 0;
-  } else if (Settings.auto && Settings.fx && Post.ok && fps < 20) { Settings.fx = false; Settings.auto = false; }
+  } else {
+    // the 2D view has three levels of its own, and moves between them the same way
+    if (Settings.quality >= 0 || Gov2.locked) return;
+    if (Gov2.before && Math.abs(fps - Gov2.before) < 3 && fps > 24) { Gov2.locked = true; setQ2D(Q2D.level + 1); return; }
+    Gov2.before = 0;
+    if (fps < 42) { Gov2.good = 0; if (Q2D.level > 0) { Gov2.cap = Q2D.level - 1; Gov2.before = fps; setQ2D(Q2D.level - 1); } }
+    else if (fps > 57 && Q2D.level < Gov2.cap) { if (++Gov2.good >= 4) { Gov2.good = 0; setQ2D(Q2D.level + 1); } }
+    else Gov2.good = 0;
+  }
+}
+const Gov2 = { good: 0, cap: 2, before: 0, locked: false };
+function setQ2D(q) {
+  q = clamp(q, 0, 2);
+  if (q === Q2D.level) return;
+  Q2D.level = q;
+  resize();
+}
+// The level each renderer starts on: whatever was chosen by hand, else a guess from the device.
+function applyQuality() {
+  const q = Settings.quality;
+  Gov.cap = 3; Gov.good = 0; Gov.before = 0; Gov.locked = false; Gov2.cap = 2; Gov2.good = 0; Gov2.before = 0; Gov2.locked = false;
+  R3.setQuality(q >= 0 ? q : Input.touch ? 1 : 2);
+  Q2D.level = q >= 0 ? Math.min(2, q) : R3.soft ? 0 : Input.touch ? 1 : 2; // no graphics hardware: start plain
+  if (canvas) resize();
 }
 let lastTs = 0;
 function frame(ts) {
@@ -1287,7 +1316,7 @@ function boot() {
   if (R3.ok && R3.soft && !Settings.forced3d) Settings.mode3d = false;
   if (R3.soft && !Settings.forcedFx) Settings.fx = false;
   R3.on = R3.ok && Settings.mode3d;
-  if (R3.ok && Settings.quality >= 0) R3.setQuality(Settings.quality);
+  applyQuality();
   if (typeof MODEL_B64 !== 'undefined') modelsArrived();
   G.motes = [];
   for (let i = 0; i < 44; i++) G.motes.push({ x: rand(), y: rand(), s: rand(1.2, 3), ph: rand(TAU), v: rand(0.008, 0.03) });
@@ -1313,6 +1342,7 @@ function boot() {
 // The model library is the last and by far the largest script on the page. The game is already running on its
 // built-in shapes by the time it arrives; swap them for the models as soon as they have decoded.
 function modelsArrived() {
+  if (!R3.on) return; // the 2D view has no use for them: they are loaded if and when 3D is switched on
   R3.loadModels(() => { R3.build(); if (UI.cur && G.state === 'menu') UI.refresh(); });
 }
 // The canvases and menu container are above the scripts in the page, so there is nothing to wait for.

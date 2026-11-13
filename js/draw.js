@@ -61,7 +61,17 @@ function ink(c, w = 1.5) { c.strokeStyle = LINE; c.lineWidth = w * 0.7; c.lineJo
 // warm from the upper-left, falling into cool shade at the lower-right. This is what stops
 // characters reading as flat cut-outs.
 const SCRATCH = document.createElement('canvas'), SC = SCRATCH.getContext('2d');
+// 2D quality. 2: everything. 1: fewer pixels, and the soft light only on figures near you and on bosses.
+// 0: plain and fast: lowest resolution, no per-figure light, no lighting pass, thinner ground clutter.
+// dpr / sdpr are the caps on the HUD canvas's and the world canvas's pixel ratio at each level.
+const Q2D = { level: 2, dpr: [1, 1.5, 2], sdpr: [1, 1.25, 1.5] };
 function lit(x, y, z, w, h, fn) {
+  // The scratch-canvas pass is the dearest thing in the 2D view (a render-target switch per figure), so at lower
+  // quality most figures are drawn straight onto the scene instead.
+  if (Q2D.level === 0 || (Q2D.level === 1 && w < 200 && Math.abs(x - G.player.x) + Math.abs(y - G.player.y) > 340)) {
+    ctx.save(); ctx.translate(sx(x), sy(y, z)); ctx.scale(View.S, View.S); fn(ctx); ctx.restore();
+    return;
+  }
   const k = RENDER.k, W = Math.ceil(w * k), H = Math.ceil(h * k), base = 16 * k;
   if (SCRATCH.width < W) SCRATCH.width = W;
   if (SCRATCH.height < H) SCRATCH.height = H;
@@ -457,13 +467,9 @@ const THEMES = {
   shed: { wall: '#b89868', roof: '#8a4a34', neon: '#fff', floorA: '#d8c9a8', floorB: '#ccbb97', screen: '#8fd3ff' },
 };
 
-function drawTerrain(M, t) {
-  const S = View.S;
-  ctx.fillStyle = '#56b4e8';
-  ctx.fillRect(0, 0, View.W, View.H);
-  const a = screenToWorld(0, 0), b = screenToWorld(View.W, View.H);
-  const vis = (x, y, r) => x + r > a.x && x - r < b.x && y + r > a.y && y - r < b.y;
-  ground((c) => {
+// The ground never changes during a match, so it is painted once into tiles and those are blitted every frame,
+// instead of filling and stroking the whole map (paths, plazas, hundreds of blobs and stones) sixty times a second.
+function paintGround(c, M, vis) {
     // island: beach rim, then meadow
     c.fillStyle = '#9ad8f5'; c.beginPath(); c.roundRect(-110, -110, ARENA.w + 220, ARENA.h + 220, 200); c.fill();
     c.fillStyle = '#f2e3ae'; c.beginPath(); c.roundRect(-60, -60, ARENA.w + 120, ARENA.h + 120, 160); c.fill();
@@ -501,21 +507,77 @@ function drawTerrain(M, t) {
       c.fillStyle = '#6f6a4c'; c.beginPath(); c.arc(o.x, o.y, o.r + 18, 0, TAU); c.fill();
       c.fillStyle = '#2c7a9e'; c.beginPath(); c.arc(o.x, o.y, o.r, 0, TAU); c.fill();
       c.fillStyle = '#48a0c2'; c.beginPath(); c.arc(o.x - o.r * 0.1, o.y - o.r * 0.12, o.r * 0.74, 0, TAU); c.fill();
-      c.strokeStyle = 'rgba(255,255,255,0.7)'; c.lineWidth = 4;
-      for (let i = 0; i < 3; i++) {
-        const u = (t * 0.25 + i / 3) % 1;
-        c.globalAlpha = 1 - u;
-        c.beginPath(); c.arc(o.x + Math.cos(i * 2.1) * o.r * 0.3, o.y + Math.sin(i * 2.1) * o.r * 0.3, 14 + u * o.r * 0.4, 0.3 + i, 2.2 + i); c.stroke();
-      }
-      c.globalAlpha = 1;
     }
     for (const g of M.grass) {
       if (!vis(g.x, g.y, g.r)) continue;
       c.fillStyle = '#44853a'; c.beginPath(); c.arc(g.x, g.y, g.r, 0, TAU); c.fill();
     }
+}
+const TILE = 512, GROUND = { tiles: new Map(), map: null, k: 0, frame: 0 };
+function groundTile(M, i, j, k) {
+  const key = i + ',' + j;
+  let t = GROUND.tiles.get(key);
+  if (t) { t.used = GROUND.frame; return t; }
+  if (GROUND.budget <= 0) return null; // a few new tiles a frame: the rest show plain meadow for a moment
+  GROUND.budget--;
+  // reuse the canvas of the tile that has gone longest unseen once there are plenty
+  let cv = null;
+  if (GROUND.tiles.size >= 80) { let old = null, ok = null; for (const [q, v] of GROUND.tiles) if (!old || v.used < old.used) { old = v; ok = q; } GROUND.tiles.delete(ok); cv = old.cv; }
+  if (!cv) { cv = document.createElement('canvas'); cv.width = cv.height = TILE; }
+  const c = cv.getContext('2d'), w = TILE / k, h = TILE / (k * YK), x0 = i * w, y0 = j * h;
+  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, TILE, TILE);
+  c.setTransform(k, 0, 0, k * YK, -i * TILE, -j * TILE);
+  paintGround(c, M, (x, y, r) => x + r > x0 && x - r < x0 + w && y + r > y0 && y - r < y0 + h);
+  t = { cv, used: GROUND.frame };
+  GROUND.tiles.set(key, t);
+  return t;
+}
+function drawTerrain(M, t) {
+  const S = View.S;
+  ctx.fillStyle = '#56b4e8';
+  ctx.fillRect(0, 0, View.W, View.H);
+  const a = screenToWorld(0, 0), b = screenToWorld(View.W, View.H);
+  const vis = (x, y, r) => x + r > a.x && x - r < b.x && y + r > a.y && y - r < b.y;
+  // tiles are painted at the resting zoom and the canvas's pixel ratio, then scaled by whatever the zoom is now
+  const k = View.S0 * (RENDER.k / S);
+  if (GROUND.map !== M || Math.abs(GROUND.k - k) > 1e-6) { GROUND.tiles.clear(); GROUND.map = M; GROUND.k = k; }
+  GROUND.frame++; GROUND.budget = 6;
+  const tw = TILE / k, th = TILE / (k * YK), ds = tw * S;
+  const i0 = Math.max(Math.floor(a.x / tw), Math.floor(-120 / tw)), i1 = Math.min(Math.floor(b.x / tw), Math.floor((ARENA.w + 120) / tw));
+  const j0 = Math.max(Math.floor(a.y / th), Math.floor(-120 / th)), j1 = Math.min(Math.floor(b.y / th), Math.floor((ARENA.h + 120) / th));
+  // At the resting zoom a tile is exactly TILE device pixels: snap the whole grid to the pixel grid and copy it
+  // straight across, with no filtering. Only while the zoom is punching in or out are tiles scaled.
+  const rd = RENDER.k / S, rest = Math.abs(S - View.S0) < 1e-4, bx = Math.round(sx(0) * rd), by = Math.round(sy(0) * rd);
+  if (rest) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = false; }
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const tl = groundTile(M, i, j, k);
+    if (rest) {
+      if (tl) ctx.drawImage(tl.cv, bx + i * TILE, by + j * TILE);
+      else { ctx.fillStyle = '#5c9a46'; ctx.fillRect(bx + i * TILE, by + j * TILE, TILE, TILE); }
+    } else {
+      const dx = sx(i * tw), dy = sy(j * th);
+      if (tl) ctx.drawImage(tl.cv, dx, dy, ds + 0.6, ds + 0.6);
+      else { ctx.fillStyle = '#5c9a46'; ctx.fillRect(dx, dy, ds + 0.6, ds + 0.6); }
+    }
+  }
+  if (rest) { ctx.imageSmoothingEnabled = true; ctx.restore(); }
+  // the only thing on the ground that moves: ripples on the ponds
+  ground((c) => {
+    c.strokeStyle = 'rgba(255,255,255,0.7)'; c.lineWidth = 4;
+    for (const o of M.ponds) {
+      if (!vis(o.x, o.y, o.r + 30)) continue;
+      for (let i = 0; i < 3; i++) {
+        const u = (t * 0.25 + i / 3) % 1;
+        c.globalAlpha = 1 - u;
+        c.beginPath(); c.arc(o.x + Math.cos(i * 2.1) * o.r * 0.3, o.y + Math.sin(i * 2.1) * o.r * 0.3, 14 + u * o.r * 0.4, 0.3 + i, 2.2 + i); c.stroke();
+      }
+    }
+    c.globalAlpha = 1;
   });
   // short tufts, flowers and pebbles: tiny billboards that never need depth sorting
-  for (const q of M.tufts) {
+  const thin = Q2D.level === 0;
+  for (let n = 0; n < M.tufts.length; n += thin ? 2 : 1) {
+    const q = M.tufts[n];
     if (!vis(q.x, q.y, 20)) continue;
     const px = sx(q.x), py = sy(q.y), w = Math.sin(t * 2 + q.x * 0.02 + q.y * 0.013) * 2.2 * S;
     if (q.k === 0) {

@@ -54,12 +54,9 @@ buttons that branch, a stamina bar, and big monsters you can knock over.
   a **dash cut**.
 - **Toppling a boss.** Heavy hits fill the yellow bar under the boss's health. Fill it and
   the boss falls over for three seconds and takes half as much damage again.
-- **Three tunings of the hit feel** are built in while this is being dialled in: **A · Snappy**
-  (fast swings, short freeze, the next attack can cut in early), **B · Weighty** (slow
-  swings, long freeze, big knockback, a beat of slow motion after heavy hits) and
-  **C · Sharp** (long lunge, big trails, zoom punch). Press **V** to switch (on a phone,
-  tap the chip in the bottom-left corner), or use the pause menu. The numbers are in the
-  `FEELS` table in `js/world.js`.
+- **Hit feel.** A long lunge closes the gap, trails and sparks are large, the camera pushes
+  in instead of shaking, the target snaps back, and heavy hits freeze for a moment and then
+  run slow for a beat. All of it is one table of numbers, `FEEL` in `js/world.js`.
 - **Training ground** (title screen): five sandbags that never fall and never hit back, no
   circle, **B** steps through the weapons.
 - When your health is in the red the screen edge pulses, the bubble-tea button throbs and
@@ -157,7 +154,12 @@ Trees and buildings between you and the camera sink out of the way so you stay v
 The HUD, name tags and damage numbers are a 2D canvas layered on top.
 
 **2D (fallback).** The earlier Canvas 2D renderer (`js/draw.js`, plus the optional WebGL
-lighting pass in `js/post.js`) is still there. The game steps down to it by itself if the
+lighting pass in `js/post.js`) is still there. It has three quality levels of its own (canvas
+resolution, whether figures get the soft per-figure light, the lighting pass and the air
+effects) that the game moves between to hold the frame rate, starting at the plainest one
+when the browser has no graphics acceleration. The ground is painted once into tiles and
+blitted, and while 2D is showing the 3D world and the model library are not built or
+decoded at all. The game steps down to it by itself if the
 3D view can't hold a frame rate in the first few seconds, and you can switch either way
 with the Graphics button in the menu.
 
