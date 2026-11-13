@@ -142,7 +142,21 @@ colour run from noon to dusk over a match, exponential fog, instanced wind-swaye
 lanterns that light up towards evening, and a final full-screen shader that adds bloom,
 sun shafts, the colour grade and grain.
 
-The people, robots, trees, rocks, desks, loot containers, street lights and parked cars are
+**Three looks**, switched with the Look button in the menu:
+
+- **Papercraft** (the default, `js/r3poly.js`): everything is a few large flat faces, like
+  a folded paper model. People are chibi, with big faceted heads, wedge-shaped locks of
+  hair and big painted eyes; trees are twenty-sided lumps and stacked cones; rocks are cut
+  from a dozen faces. Each person is merged into six meshes sharing one material.
+- **Blocks** (`js/r3blocks.js`): boxes with 64x64 pixel-art skins and unfiltered 16x16
+  textures.
+- **Models** (`js/r3models.js`): the downloaded CC0 models described below. They are only
+  decoded if this look is chosen.
+
+Papercraft and blocks are built entirely in code from each character's `look` (colours,
+hair style, glasses, tie and so on), which is why the bosses keep their features in both.
+
+In the models look, the people, robots, trees, rocks, desks, loot containers, street lights and parked cars are
 free CC0 models (see [CREDITS.md](CREDITS.md)), packed into `assets/models.js` and loaded
 by `js/r3models.js`. The five bosses are those same bodies recoloured, with glasses and
 hair added in code. The buildings are modern offices built in code (`js/r3office.js`):
@@ -180,6 +194,8 @@ with the Graphics button in the menu.
 | `js/r3world.js` | 3D renderer: scene, procedural textures, static world, camera, sun and fog, post shader |
 | `js/r3actors.js` | 3D renderer: character and creature rigs, per-frame sync of everything that moves, effects, the 2D overlay |
 | `js/r3models.js` | 3D renderer: loads the model library, animated character rigs, the bosses' looks, model trees, desks and containers |
+| `js/r3poly.js` | 3D renderer: the papercraft look (people, creatures, trees, rocks) and the choice between looks |
+| `js/r3blocks.js` | 3D renderer: the blocky look, and the instanced-shape scatter both built-in looks use |
 | `js/r3office.js` | 3D renderer: the office buildings (curtain-wall textures, lobbies, the five headquarters) |
 | `assets/models/` | the 24 models as GLB files (about 1.7 MB) |
 | `assets/models.js` | the same models packed as base64 into one script, which is what the game loads, so it still runs from `file://` and as a single file |

@@ -261,7 +261,7 @@ R3.syncActors = function (dt) {
     R.g.rotation.y = yaw(p.dashT > 0 && p.dashKind === 'd' && R.model ? Math.atan2(p.dashDir.y, p.dashDir.x) : p.swingT > 0 ? p.swingA : p.aim);
     if (R.model) {
       posePlayer(R, p, dt);
-    } else poseRig(R, { t: p.t, moving: p.moving, pace: 15, swing: p.swingT > 0 ? 1 - p.swingT / p.swingMax : null, dir: p.swingDir, armUp: p.castT > 0 || p.charge > 0.3 });
+    } else posePlayerBlock(R, p);
     for (const m of R.mats) { m.transparent = p.hidden; m.opacity = p.hidden ? 0.6 : 1; }
     if (p.charge > 0.2) {
       // the ring shows how far the release will reach; it steps out and changes colour at each charge level
