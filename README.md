@@ -54,6 +54,14 @@ buttons that branch, a stamina bar, and big monsters you can knock over.
   a **dash cut**.
 - **Toppling a boss.** Heavy hits fill the yellow bar under the boss's health. Fill it and
   the boss falls over for three seconds and takes half as much damage again.
+- **Three tunings of the hit feel** are built in while this is being dialled in: **A · Snappy**
+  (fast swings, short freeze, the next attack can cut in early), **B · Weighty** (slow
+  swings, long freeze, big knockback, a beat of slow motion after heavy hits) and
+  **C · Sharp** (long lunge, big trails, zoom punch). Press **V** to switch (on a phone,
+  tap the chip in the bottom-left corner), or use the pause menu. The numbers are in the
+  `FEELS` table in `js/world.js`.
+- **Training ground** (title screen): five sandbags that never fall and never hit back, no
+  circle, **B** steps through the weapons.
 - When your health is in the red the screen edge pulses, the bubble-tea button throbs and
   a prompt tells you to drink.
 - **Q · Pass the Blame**: throw a wok in a line; the first thing it hits is stunned.

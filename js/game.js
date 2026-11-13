@@ -37,7 +37,7 @@ const money = (n) => '¥' + Math.round(n).toLocaleString('en-US');
 let canvas, DPR = 1, SDPR = 1; // the world renders at up to 1.5x; the HUD stays at full sharpness
 let hctx = null, sctx = null, sceneCv = null, glCv = null, c3 = null; // HUD canvas (also takes input), offscreen world canvas, WebGL output
 
-function startMatch(kit) {
+function startMatch(kit, training) {
   Bank.money -= kit.cost; Bank.save();
   genWorld();
   R3.build();
@@ -57,10 +57,24 @@ function startMatch(kit) {
   }
   Object.assign(G, { state: 'play', time: 0, kills: 0, signed: 0, exT: 0, exitsOpen: false, result: null, lastHit: '', cine: null });
   G.quest = { i: 0, base: 0, doneT: 0, scan: 0, now: null, tg: null, showT: 0, showMax: 6 };
+  G.training = !!training; G.impactT = 0;
+  if (training) {
+    // the training ground: five sandbags in a ring, nobody else, no circle, every weapon on a key
+    let k = 0;
+    for (const e of G.enemies) {
+      if (e.type !== 'rival') continue;
+      if (k >= 5) { e.dead = true; continue; }
+      const a = -Math.PI / 2 + (k - 2) * 0.62, d = 190 + (k % 2) * 60;
+      e.dummy = true; e.x = e.hx = p.x + Math.cos(a) * d; e.y = e.hy = p.y + Math.sin(a) * d; e.hp = e.maxhp = 320; e.armor = 0; e.spawnT = 0; e.lvl = k % 3;
+      k++;
+    }
+    p.weapon = 'keyboard'; p.tea = 6;
+  }
   View.cam.x = p.x; View.cam.y = p.y;
   try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {}); } catch (e) { /* not available */ }
   UI.hide();
-  G.quest.showT = 6; // the first objective is announced large, in the middle of the screen
+  if (training) banner(T('train_title'), T(Input.touch ? 'train_sub_touch' : 'train_sub'), 4.5, '#ffe14d');
+  else G.quest.showT = 6; // the first objective is announced large, in the middle of the screen
   Sfx.play('boss');
 }
 
@@ -87,8 +101,9 @@ function update(dt) {
   const wdt = G.slowT > 0 ? dt * 0.28 : dt;
   G.slowT = Math.max(0, G.slowT - dt);
   G.time += wdt;
+  if (G.training) G.zone.t = 999; // the circle never closes on the training ground
   updateZone(wdt);
-  if (!G.exitsOpen && G.time >= 40) {
+  if (!G.exitsOpen && G.time >= 40 && !G.training) {
     G.exitsOpen = true;
     for (const e of G.exits) e.open = true;
     banner(T('exit_open'), T('exit_open_sub'), 2.8, '#7df0a0');
@@ -124,7 +139,7 @@ function update(dt) {
   updateContainers(dt);
   updatePickups(dt);
   updatePets(dt);
-  updateQuest(dt);
+  if (!G.training) updateQuest(dt);
   updateFx(dt);
   if (G.state !== 'play') return;
 
@@ -867,6 +882,7 @@ function skillButtons() {
     return [
       at('atk', 76, 84, 43), at('d', 180, 56, 27), at('q', 170, 138, 25), at('e', 109, 189, 25), at('r', 36, 186, 27), at('tea', 252, 40, 22),
       { id: 'pause', x: R - 14 * u - ms - 30, y: sf.t + 14 * u + 16, r: 17 },
+      { id: 'feel', x: sf.l + 12 * u + 50 * u, y: H - Math.max(sf.b, 6) - 21 * u, r: 0, hit: 44 },
     ];
   }
   const gap = 68 * u, y = H - 58 * u, x0 = W / 2 - gap * 2;
@@ -998,6 +1014,7 @@ function drawSkills(u) {
   const p = G.player, low = p.hp > 0 && p.hp <= p.maxhp * 0.35 && G.state === 'play', beat = 0.5 + 0.5 * Math.sin(G.t * 9);
   const FACE = { r: '#f2b01e', hvy: '#ff8a3c', atk: '#ff5a6e', tea: '#ffd0d6', e: '#e8f6ff', q: '#fff6e0', d: '#f1eefb' };
   for (const b of skillButtons()) {
+    if (b.id === 'feel') continue; // drawn as the chip below
     if (b.id === 'pause') {
       plate(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2, 9);
       ctx.fillStyle = '#fff'; ctx.fillRect(b.x - 6, b.y - 7, 4, 14); ctx.fillRect(b.x + 2, b.y - 7, 4, 14);
@@ -1024,6 +1041,16 @@ function drawSkills(u) {
       ctx.beginPath(); ctx.arc(bx, by, br, 0, TAU); ctx.fill(); ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.font = `900 ${Math.round(12 * u)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(p.tea), bx, by + 0.5);
     }
+  }
+  {
+    // which tuning is on, and how to change it (bottom-left; on a phone it is a button)
+    const sf = View.safe, tx = T('feel_' + FEEL.id);
+    ctx.font = `900 ${Math.round(12 * u)}px ${FONT}`;
+    const w = ctx.measureText(tx).width + (Input.touch ? 24 : 54) * u, x = sf.l + 12 * u, y = View.H - Math.max(sf.b, 6) - 34 * u;
+    plate(x, y, w, 26 * u, 9 * u);
+    hudText(tx, x + 11 * u, y + 13.5 * u, 12 * u, '#ffe14d', 'left', 900);
+    if (!Input.touch) keycap(x + w - 18 * u, y + 11 * u, 'V', u * 0.85, false);
+    if (G.training && !Input.touch) { plate(x + w + 8 * u, y, 96 * u, 26 * u, 9 * u); hudText(T('w_' + p.weapon), x + w + 18 * u, y + 13.5 * u, 11 * u, '#fff', 'left', 800); keycap(x + w + 86 * u, y + 11 * u, 'B', u * 0.85, false); }
   }
   if (!Input.touch) {
     // left of the bar: which mouse button is the light attack and which the heavy
@@ -1084,7 +1111,7 @@ function showTitle() {
     <button class="big" data-act="kits">${T('start')}</button>
     <div class="bank"><i></i><b>${money(Bank.money)}</b></div>
     <div class="stamps">${['pony', 'yiming', 'elon', 'sam', 'dario'].map((id) => `<span class="${Bank.ceo.includes(id) ? 'on' : ''}">${shortName(id)}</span>`).join('')}</div>
-    <div class="row"><button class="ghost" data-act="how">${T('how')}</button></div>
+    <div class="row"><button class="ghost" data-act="how">${T('how')}</button><button class="ghost" data-act="train">${T('train')}</button></div>
     ${optRow()}
     ${R3.ok && R3.soft ? `<p class="note">${T('no_gpu')}</p>` : R3.on && !R3.models && !R3.modelsFailed ? `<p class="note">${T('loading_models')}</p>` : ''}
     <p class="disc">${T('disclaimer')}</p>`);
@@ -1141,7 +1168,7 @@ function showPause() {
   UI.show(() => `
     <h1>${T('paused')}</h1>
     <button class="big" data-act="resume">${T('resume')}</button>
-    <div class="row"><button class="ghost" data-act="how2">${T('how')}</button></div>
+    <div class="row"><button class="ghost" data-act="how2">${T('how')}</button><button class="ghost" data-act="feel">${T('feel_btn', T('feel_' + FEEL.id))}</button>${G.training ? `<button class="ghost" data-act="weapon">${T('train_weapon', T('w_' + G.player.weapon))}</button>` : ''}</div>
     ${optRow()}
     <button class="ghost" data-act="menu">${T('quit')}</button>`);
 }
@@ -1157,6 +1184,9 @@ function onAction(act, el) {
   else if (act === 'mode') { R3.on = Settings.mode3d = !R3.on; Settings.auto = false; Settings.save(); UI.refresh(); }
   else if (act === 'quality') { Settings.quality = Settings.quality >= 3 ? -1 : Settings.quality + 1; Gov.cap = 3; Gov.good = 0; Gov.before = 0; Gov.locked = false; R3.setQuality(Settings.quality < 0 ? (Input.touch ? 1 : 2) : Settings.quality); Settings.save(); UI.refresh(); }
   else if (act === 'menu') showTitle();
+  else if (act === 'train') startMatch(KITS[0], true);
+  else if (act === 'feel') { setFeel(FEELS.indexOf(FEEL) + 1, true); UI.refresh(); }
+  else if (act === 'weapon') { cycleWeapon(); UI.refresh(); }
   else if (act === 'full') { const d = document, e = d.documentElement; try { if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d); else (e.requestFullscreen || e.webkitRequestFullscreen).call(e); } catch (er) { /* not allowed here */ } }
   else if (act === 'how') { howBack = 'menu'; showHow(); }
   else if (act === 'how2') { howBack = 'pause'; showHow(); }
@@ -1216,7 +1246,9 @@ function frame(ts) {
   if (G.state === 'play') {
     // hit-stop: the world freezes for a few frames on a solid hit
     if (G.cine) updateCine(dt);
-    else if (G.hitstop > 0) { G.hitstop -= dt; updateFx(dt * 0.25); } else update(dt);
+    else if (G.hitstop > 0) { G.hitstop -= dt; updateFx(dt * 0.25); }
+    else if (G.impactT > 0) { G.impactT -= dt; update(dt * 0.3); } // the beat of slow motion after a heavy hit
+    else update(dt);
   } else if (G.state === 'menu') {
     updateFx(dt);
     updateCamera(dt, ARENA.w / 2 + Math.sin(G.t * 0.07) * 1300, ARENA.h / 2 + Math.cos(G.t * 0.05) * 1100);
@@ -1267,7 +1299,7 @@ function boot() {
   });
   Input.hitButton = (x, y) => {
     if (G.state !== 'play') return null;
-    for (const b of skillButtons()) if (dist(x, y, b.x, b.y) < b.r + 8) return b.id;
+    for (const b of skillButtons()) if (dist(x, y, b.x, b.y) < (b.hit || b.r + 8)) return b.id;
     return null;
   };
   canvas.addEventListener('pointerdown', () => Sfx.init());

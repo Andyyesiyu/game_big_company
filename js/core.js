@@ -140,6 +140,7 @@ const Input = {
 
 // ---------- tiny synth ----------
 const Sfx = {
+  rate: 1,
   ctx: null,
   muted: false,
   init() {
@@ -153,6 +154,7 @@ const Sfx = {
     const t0 = this.ctx.currentTime + delay;
     const o = this.ctx.createOscillator(), g = this.ctx.createGain();
     o.type = type;
+    f *= this.rate; slide *= this.rate; // rate: a pitch shift for whatever is played while it is set
     o.frequency.setValueAtTime(f, t0);
     if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, f + slide), t0 + d);
     g.gain.setValueAtTime(vol, t0);

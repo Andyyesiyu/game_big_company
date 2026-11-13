@@ -365,6 +365,14 @@ function useTea() {
   burst(p.x, p.y, 40, 10, ['#f8e1c4', '#ff9aa2', '#fff'], { sp: 80, up: 160 });
   Sfx.play('pickup');
 }
+// training ground: step through the five weapons, since each one swings very differently
+function cycleWeapon() {
+  const p = G.player, ids = Object.keys(WEAPONS), id = ids[(ids.indexOf(p.weapon) + 1) % ids.length];
+  p.weapon = id;
+  floater(p.x, p.y, 84, T('w_' + id), TIER[WEAPONS[id].tier], 18, 1.5);
+  ring(p.x, p.y, 60, TIER[WEAPONS[id].tier], 0.4);
+  Sfx.play('pickup');
+}
 function giveWeapon(id) {
   const p = G.player;
   if (WEAPONS[id].tier <= WEAPONS[p.weapon].tier) return false;
@@ -488,32 +496,61 @@ function hitTarget(t, dmg, o) {
   floater(t.x + rand(-14, 14), t.y, 64 + rand(26), (crit ? T('crit') + ' ' : '') + dmg, crit ? '#ffe14d' : '#fff', crit ? 26 : 16 + Math.min(9, dmg / 7), 0.8);
   // contact point: between you and them, a burst of streaks thrown along the blow
   const cx0 = t.x - Math.cos(a) * t.r * 0.6, cy0 = t.y - Math.sin(a) * t.r * 0.6;
-  G.sparks.push({ star: true, x: cx0, y: cy0, z: hz, t: 0, life: big ? 0.2 : 0.14, len: big ? 46 : 30, rot: rand(TAU) });
-  for (let i = 0, n = big ? 11 : 6; i < n; i++) G.sparks.push({ x: cx0, y: cy0, z: hz, a: a + rand(-1.0, 1.0), len: rand(40, big ? 150 : 95), t: 0, life: rand(0.12, 0.24), w: rand(2, big ? 5.5 : 3.5), col: i % 3 ? '#fff' : '#ffd66b' });
+  const F = FEEL;
+  G.sparks.push({ star: true, x: cx0, y: cy0, z: hz, t: 0, life: big ? 0.2 : 0.14, len: (big ? 46 : 30) * F.sparks, rot: rand(TAU) });
+  for (let i = 0, n = Math.round((big ? 11 : 6) * F.sparks); i < n; i++) G.sparks.push({ x: cx0, y: cy0, z: hz, a: a + rand(-1.0, 1.0), len: rand(40, big ? 150 : 95) * (0.7 + F.sparks * 0.3), t: 0, life: rand(0.12, 0.24), w: rand(2, big ? 5.5 : 3.5), col: i % 3 ? '#fff' : '#ffd66b' });
   burst(t.x, t.y, hz, big ? 10 : 5, ['#fff', '#ffe08a', '#ffb347'], { sp: 300, up: 240, life: 0.4, size: 5 });
   if (big) { ring(t.x, t.y, 56, '#fff', 0.2); G.flash = { color: '255,255,255', t: 0.07, max: 0.07, a: 0.14 }; }
   // freeze, then shove the camera along the blow and punch the zoom
-  G.hitstop = Math.max(G.hitstop, o.heavy ? 0.12 : crit ? 0.1 : 0.06);
-  View.kx += Math.cos(a) * (big ? 13 : 4); View.ky += Math.sin(a) * YK * (big ? 13 : 4);
-  View.zk = Math.max(View.zk, big ? 0.05 : 0.014);
-  View.shake = Math.max(View.shake, o.heavy ? 8 : crit ? 5 : 0); // ordinary hits lean the camera but do not shake it
+  G.hitstop = Math.max(G.hitstop, F.stop[o.heavy ? 2 : crit ? 1 : 0]);
+  if (o.heavy && F.impact) G.impactT = Math.max(G.impactT || 0, F.impact); // a breath of slow motion after the freeze
+  View.kx += Math.cos(a) * (big ? 13 : 4) * F.kick; View.ky += Math.sin(a) * YK * (big ? 13 : 4) * F.kick;
+  View.zk = Math.max(View.zk, (big ? 0.05 : 0.014) * F.zoom);
+  View.shake = Math.max(View.shake, (o.heavy ? 8 : crit ? 5 : F.lightShake) * F.shake);
+  if (o.heavy && F.id === 'b') ring(t.x, t.y, 74, '#d9c98f', 0.32); // the heavy tuning kicks up dust
   t.hitAt = G.t;
+  t.recoil = Math.max(t.recoil || 0, (big ? 0.6 : 0.34) * F.recoil); // they snap back from the blow (3D rigs lean with it)
   G.combo++; G.comboT = 2.6;
-  Sfx.play(big ? 'hit2' : 'hit', G.combo);
+  Sfx.rate = F.pitch; Sfx.play(big ? 'hit2' : 'hit', G.combo); Sfx.rate = 1;
   if (big && Input.touch && navigator.vibrate) { try { navigator.vibrate(big && o.heavy ? 28 : 14); } catch (e) { /* not allowed here */ } }
-  if (isBoss) { damageBoss(t, dmg); addKo(t, dmg * (o.ko != null ? o.ko : o.heavy ? 0.6 : 0.2) * (WEAPONS[p.weapon].ko || 1)); return true; }
+  if (isBoss) { damageBoss(t, dmg); t.flash = Math.max(t.flash || 0, F.flash); addKo(t, dmg * (o.ko != null ? o.ko : o.heavy ? 0.6 : 0.2) * (WEAPONS[p.weapon].ko || 1)); return true; }
   // --- the reaction: knocked back, and staggered out of whatever they were doing ---
-  if (o.kb) { t.kx += Math.cos(a) * o.kb; t.ky += Math.sin(a) * o.kb; }
+  if (o.kb) { t.kx += Math.cos(a) * o.kb * F.kb; t.ky += Math.sin(a) * o.kb * F.kb; }
   if (o.stun) { t.stun = Math.max(t.stun, o.stun); if (o.air) t.air = t.stun; t.wind = 0; t.dashWind = 0; }
   else if (!(t.poiseT > G.time)) {
     // a few hits in a row and they grit their teeth: no more flinching for a moment, so they can answer back
     t.flinch = (t.flinchAt > G.time - 1.5 ? t.flinch || 0 : 0) + 1; t.flinchAt = G.time;
     if (t.flinch >= 5) { t.flinch = 0; t.poiseT = G.time + 1.6; }
-    else { t.stun = Math.max(t.stun, 0.22); t.wind = 0; t.dashWind = 0; }
+    else { t.stun = Math.max(t.stun, F.flinch); t.wind = 0; t.dashWind = 0; }
   }
   damageEnemy(t, dmg);
+  t.flash = Math.max(t.flash || 0, F.flash);
   return true;
 }
+
+// ---------- how a hit feels ----------
+// Three tunings of the same moves, to compare by hand (V switches, the pause menu too). Each one changes
+// the things you feel on the moves you use most: how fast a swing comes out and how soon the next can start,
+// how long the world freezes on contact, how far the target is thrown and how hard it recoils, how much the
+// camera reacts, and whether a finishing blow drops into a breath of slow motion.
+//   speed  swing time multiplier          at      shifts when in the swing the blow lands
+//   cancel how much of the swing can be cut short by the next attack once the blow has landed
+//   stop   hit-stop seconds for a light hit, a crit, a heavy hit
+//   kick / shake / zoom  camera reaction   kb / flinch  knockback and stagger   recoil  how far they snap back
+//   lunge / lungeT  how far and how fast you close the gap   impact  slow motion after a heavy hit, seconds
+//   sparks / trail / flash  size of the effects   pitch  pitch of the hit sound   lightShake  shake on a light hit
+const FEELS = [
+  { id: 'a', speed: 0.84, at: -0.05, cancel: 0.32, stop: [0.035, 0.065, 0.08], kick: 0.8, shake: 0.6, zoom: 0.8, kb: 0.65, flinch: 0.2, recoil: 0.7, lunge: 1.15, lungeT: 0.07, impact: 0, sparks: 1.3, trail: 1.0, flash: 0.09, pitch: 1.22, lightShake: 0 },
+  { id: 'b', speed: 1.14, at: 0.04, cancel: 0.06, stop: [0.085, 0.13, 0.19], kick: 1.5, shake: 1.6, zoom: 1.3, kb: 1.4, flinch: 0.36, recoil: 1.5, lunge: 0.9, lungeT: 0.11, impact: 0.26, sparks: 1.0, trail: 1.25, flash: 0.15, pitch: 0.8, lightShake: 2.2 },
+  { id: 'c', speed: 0.95, at: -0.02, cancel: 0.2, stop: [0.06, 0.1, 0.12], kick: 0.6, shake: 0.45, zoom: 1.7, kb: 1.0, flinch: 0.27, recoil: 1.0, lunge: 1.4, lungeT: 0.08, impact: 0.13, sparks: 1.7, trail: 1.6, flash: 0.12, pitch: 1.0, lightShake: 0 },
+];
+let FEEL = FEELS[0];
+function setFeel(i, quiet) {
+  FEEL = FEELS[((i % FEELS.length) + FEELS.length) % FEELS.length];
+  try { localStorage.setItem('layoff_games_feel', FEEL.id); } catch (e) { /* ignore */ }
+  if (!quiet && G.state === 'play') { banner(T('feel_' + FEEL.id), T('feel_' + FEEL.id + '_d'), 1.6, '#ffe14d'); Sfx.play('ui'); }
+}
+try { const v = localStorage.getItem('layoff_games_feel'), k = FEELS.findIndex((f) => f.id === v); if (k >= 0) FEEL = FEELS[k]; } catch (e) { /* ignore */ }
 
 // ---------- the moveset ----------
 // Light attacks string together, and a heavy attack branches off wherever you are in the string:
@@ -569,15 +606,15 @@ function startMove(p, id) {
     if (Input.touch || p.lock || Math.abs(angDiff(p.aim, a)) < 1.3) {
       p.aim = a;
       // close the gap so the blow lands
-      const gap = Math.min(d - w.reach * m.reach * 0.6 - tg.r, 115 + (m.lunge || 0));
-      if (gap > 8) { p.lungeT = 0.09; p.lvx = (Math.cos(a) * gap) / 0.09; p.lvy = (Math.sin(a) * gap) / 0.09; lunged = true; }
+      const gap = Math.min(d - w.reach * m.reach * 0.6 - tg.r, (115 + (m.lunge || 0)) * FEEL.lunge), lt = FEEL.lungeT;
+      if (gap > 8) { p.lungeT = lt; p.lvx = (Math.cos(a) * gap) / lt; p.lvy = (Math.sin(a) * gap) / lt; lunged = true; }
       else if (m.lunge) lunged = true;
     }
   }
   if (m.lunge && !lunged) { p.lungeT = 0.12; p.lvx = (Math.cos(p.aim) * m.lunge) / 0.12; p.lvy = (Math.sin(p.aim) * m.lunge) / 0.12; }
   if (light) p.chain = p.chainT > 0 && p.chain < n ? p.chain + 1 : 1;
   p.mv = m; p.mvId = id; p.swingDir = m.dir;
-  p.swingT = p.swingMax = w.swing * m.time;
+  p.swingT = p.swingMax = w.swing * m.time * FEEL.speed;
   p.chainT = id === 'slam' ? 0 : p.swingMax + 0.8;
   if (id === 'slam') p.chain = 0;
   p.swingA = p.aim; p.swingHit = false; p.fireT = 1.2; p.afterDash = 0; p.swingN = (p.swingN || 0) + 1;
@@ -601,7 +638,7 @@ function resolveSwing(p) {
     });
   } else {
     const half = m.half || w.arc * m.arc;
-    G.slashes.push({ x: p.x, y: p.y, a, reach, half, t: 0, life: m.heavy ? 0.28 : 0.2, col: TIER[w.tier], fin: !!m.heavy, dir: p.swingDir, line: m.kind === 'thrust' });
+    G.slashes.push({ x: p.x, y: p.y, a, reach: reach * (0.9 + FEEL.trail * 0.1), half, t: 0, life: (m.heavy ? 0.28 : 0.2) * FEEL.trail, col: TIER[w.tier], fin: !!m.heavy, dir: p.swingDir, line: m.kind === 'thrust' });
     forTargets((t) => {
       if (inArc(p.x, p.y, a, reach, half, t)) landed = hitTarget(t, dmg, { a: angTo(p.x, p.y, t.x, t.y), kb: w.kb * m.kb, heavy: !!m.heavy, stun: m.air || (m.fin ? w.stun3 || 0 : 0), air: !!m.air, ko: m.ko, crit: ctr }) || landed;
     });
@@ -700,6 +737,8 @@ function updatePlayer(dt) {
   if (lk && (lk.dead || lk.down || lk.gone || lk.hp <= 0 || dist(p.x, p.y, lk.x, lk.y) > 720)) p.lock = null;
 
   const idle = free && p.swingT <= 0;
+  // once a blow has landed, the tail of the swing can be cut short by the next attack
+  const canAtk = free && (p.swingT <= 0 || (p.swingHit && p.swingT <= p.swingMax * FEEL.cancel));
   const aimCursor = () => {
     if (p.lock) p.aim = angTo(p.x, p.y, p.lock.x, p.lock.y);
     else if (body) p.aim = angTo(p.x, p.y, body.x, body.y);
@@ -725,7 +764,7 @@ function updatePlayer(dt) {
   if (press('hvy', 'rclick', 'KeyK')) p.hbuf = 0.35;
   if (p.hbuf > 0) {
     p.hbuf -= dt;
-    if (idle && p.charge < CHARGE_AT[0]) {
+    if (canAtk && p.charge < CHARGE_AT[0]) {
       p.hbuf = 0; p.buf = 0;
       const id = nextHeavy(p);
       if (spend(p, MOVES[id].cost)) { if (!Input.touch) aimCursor(); startMove(p, id); }
@@ -733,7 +772,7 @@ function updatePlayer(dt) {
   }
   if (p.buf > 0) {
     p.buf -= dt;
-    if (idle && p.swingT <= 0 && p.charge < CHARGE_AT[0]) {
+    if (canAtk && p.charge < CHARGE_AT[0]) {
       p.buf = 0;
       if (!Input.touch) { aimCursor(); startSwing(p); }
       else { const id = nextTouch(p); if (MOVES[id].cost) spend(p, MOVES[id].cost); startMove(p, id); }
@@ -789,11 +828,13 @@ function updatePlayer(dt) {
     Sfx.play('warn');
   }
   if (Input.take('KeyF') | Input.take('btn_tea')) useTea();
+  if (Input.take('KeyV') | Input.take('btn_feel')) setFeel(FEELS.indexOf(FEEL) + 1);
+  if (G.training && Input.take('KeyB')) cycleWeapon();
 
   if (p.castT > 0) p.castT -= dt;
   if (p.swingT > 0) {
     p.swingT -= dt;
-    if (!p.swingHit && p.swingT <= p.swingMax * (1 - (p.mv ? p.mv.at : 0.32))) { p.swingHit = true; resolveSwing(p); }
+    if (!p.swingHit && p.swingT <= p.swingMax * (1 - clamp((p.mv ? p.mv.at : 0.32) + FEEL.at, 0.15, 0.7))) { p.swingHit = true; resolveSwing(p); }
   }
 
   let vx, vy;
@@ -1006,6 +1047,7 @@ function spawnRival(x, y) {
 
 function damageRival(e, d, src) {
   if (e.dead) return;
+  if (e.dummy) { e.hp = Math.max(1, e.hp - d); e.flash = 0.09; e.hurtAt = G.time; return; } // a sandbag: takes it, never falls
   if (e.armor > 0) { const ab = Math.min(e.armor, d * 0.55); e.armor -= ab; d -= ab; }
   e.hp -= d;
   e.flash = 0.09;
@@ -1135,6 +1177,13 @@ function updateRival(e, dt) {
     e.z = e.air > 0 ? Math.sin(Math.PI * clamp(1 - e.stun / e.air, 0, 1)) * 44 : 0;
     if (e.stun <= 0) { e.air = 0; e.z = 0; }
     e.moving = false;
+    pushOut(e);
+    return;
+  }
+  if (e.dummy) {
+    // training ground sandbag: stands its post facing you, shakes hits off, and tops itself back up
+    e.aim = angTo(e.x, e.y, p.x, p.y); e.moving = false; e.wind = 0;
+    if (G.time - (e.hurtAt || -9) > 1.4) { e.hp = Math.min(e.maxhp, e.hp + e.maxhp * dt); e.x += (e.hx - e.x) * Math.min(1, dt * 2); e.y += (e.hy - e.y) * Math.min(1, dt * 2); }
     pushOut(e);
     return;
   }

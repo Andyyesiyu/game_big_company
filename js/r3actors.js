@@ -281,6 +281,9 @@ R3.syncActors = function (dt) {
     R.g.position.set(e.x + Math.sin(t * 95) * 5 * j, (e.z || 0) + rise * 40, e.y);
     R.g.rotation.y = yaw(rival ? (e.wind > 0 ? e.windA : e.aim) : angTo(e.x, e.y, p.x, p.y));
     R.g.rotation.z = e.stun > 0 ? Math.sin(t * 18) * 0.16 : 0;
+    // snapped back by a blow: lean away, then recover
+    if (e.recoil > 0) e.recoil = Math.max(0, e.recoil - dt * 3.2);
+    if (R.inner) R.inner.rotation.x = -(e.recoil || 0) * 0.85;
     if (rival && R.person) setWeapon(R, e.w);
     if (R.model) {
       const wdt = dt * (G.slowT > 0 ? 0.28 : 1);
@@ -328,6 +331,8 @@ R3.syncActors = function (dt) {
     const intro = G.cine && G.cine.b === b;
     R.g.rotation.y = yaw(intro ? Math.PI / 2 : charging ? b.data.ca : angTo(b.x, b.y, p.x, p.y));
     R.g.rotation.z = b.stun > 0 ? Math.sin(t * 16) * 0.14 : 0;
+    if (b.recoil > 0) b.recoil = Math.max(0, b.recoil - dt * 3.2);
+    if (R.inner) R.inner.rotation.x = -(b.recoil || 0) * 0.4;
     if (R.model) {
       if (intro) animSet(R, G.cine.t < 1.5 ? 'Idle' : 'Victory', { speed: 0.9 });
       else if (b.down) animSet(R, 'SitDown', { once: true });
