@@ -7,9 +7,15 @@ R3.models = null;
 const SKIN_TONES = ['#f6d3b3', '#eec3a2', '#dfae86', '#c9966c', '#a9744f'];
 const CHAR_K = 74 / 3.33; // model units -> world units, so everyone stands about 74 tall
 const RIVAL_MODELS = ['Casual_Female', 'Casual2_Male', 'Casual3_Male', 'Casual3_Female', 'Worker_Male', 'Casual_Male'];
-const BOSS_MODELS = { pony: 'Suit_Male', yiming: 'Casual2_Male', elon: 'Casual_Bald', sam: 'Casual3_Male', dario: 'OldClassy_Male' };
-const HQ_MODELS = { pony: 'building_castle_blue', yiming: 'building_tavern_red', elon: 'building_blacksmith_red', sam: 'building_market_green', dario: 'building_church_yellow' };
-const SHED_MODELS = ['building_home_A_yellow', 'building_home_B_blue', 'building_home_A_green', 'building_home_B_red'];
+// The five bosses: a body from the pack, recoloured, plus the features people know them by.
+// cols maps the model's material names to new colours; hair: null hides the model's own hair.
+const BOSS_LOOK = {
+  pony: { model: 'Suit_Male', sc: 1.4, skin: '#f0c8a0', hair: '#15151a', cols: { Black: '#243357', Shirt: '#ffffff', Details: '#2f6fd6' }, glasses: 'rimless' },
+  yiming: { model: 'Casual2_Male', sc: 1.36, skin: '#f0c8a0', hair: '#141418', cols: { Shirt: '#7f8b99', Pants: '#20232b' }, glasses: 'square' },
+  elon: { model: 'Suit_Male', sc: 1.6, skin: '#f2d2b6', hair: '#3b2a1e', cols: { Black: '#17171a', Shirt: '#0e0e10', Details: '#0e0e10', Belt: '#0b0b0d' } },
+  sam: { model: 'Casual2_Male', sc: 1.34, skin: '#f4d6bc', hair: '#a07a52', cols: { Shirt: '#6e7f78', Pants: '#3a4a6b' } },
+  dario: { model: 'Suit_Male', sc: 1.46, skin: '#eec6a4', hair: null, cols: { Black: '#3d4350', Shirt: '#dfe7f2', Details: '#dfe7f2' }, glasses: 'round', curls: '#3a2718' },
+};
 
 R3.loadModels = function (done) {
   if (!this.ok || typeof MODEL_B64 === 'undefined' || !THREE.GLTFLoader || !THREE.SkeletonUtils) return;
@@ -77,12 +83,16 @@ function cloneModel(src, skinned) {
 }
 
 // ---------- animated people ----------
-function rigChar(name, sc = 1, skin) {
+function rigChar(name, sc = 1, skin, look) {
   const src = R3.models[name], g = new THREE.Group(), c = cloneModel(src, true), inner = c.o;
   inner.scale.multiplyScalar(CHAR_K);
   inner.position.y = -src.userData.min.y * CHAR_K;
   const tone = skin || pick(SKIN_TONES);
-  for (const m of c.mats) if (m.name === 'Skin') m.color.set(tone);
+  for (const m of c.mats) {
+    if (m.name === 'Skin') m.color.set(tone);
+    else if (look && m.name === 'Hair') { if (look.hair) m.color.set(look.hair); else m.visible = false; }
+    else if (look && look.cols[m.name]) m.color.set(look.cols[m.name]);
+  }
   selfLit(c.mats);
   g.add(inner);
   g.scale.setScalar(sc);
@@ -92,7 +102,47 @@ function rigChar(name, sc = 1, skin) {
   const fist = inner.getObjectByName('FistR'), hand = new THREE.Group();
   hand.rotation.order = 'YXZ';
   g.add(hand);
-  return { g, inner, mixer, actions, curA: null, key: null, mats: c.mats, hand, fist, sc, person: true, model: true, w: null };
+  const R = { g, inner, by: inner.position.y, mixer, actions, curA: null, key: null, mats: c.mats, hand, fist, sc, person: true, model: true, w: null };
+  if (look && (look.glasses || look.curls)) headwear(R, look);
+  return R;
+}
+// Glasses and hair that ride on the head bone. Built around the bone's resting place, in the rig's own
+// units: the eyes sit 10.9 up and 10.7 forward of it, 5.2 either side, and the skull is about 11 across.
+const _hm = new THREE.Matrix4(), _hq = new THREE.Quaternion(), _hs = new THREE.Vector3();
+function headLocal(R) { return _hm.copy(R.g.matrixWorld).invert().multiply(R.headBone.matrixWorld); }
+function headwear(R, look) {
+  const acc = (R.acc = new THREE.Group()), mats = [];
+  R.headBone = R.inner.getObjectByName('Head');
+  R.g.add(acc);
+  R.g.updateMatrixWorld(true);
+  headLocal(R).decompose(acc.position, _hq, _hs);
+  R.headRest = _hq.clone().invert();
+  if (look.glasses) {
+    const thin = look.glasses === 'rimless', sq = look.glasses !== 'round', wide = thin ? 1.2 : 1.08, tall = thin ? 0.62 : 0.86;
+    const fm = std(thin ? 0x8d98a3 : 0x17171b, { roughness: 0.35, metalness: thin ? 0.5 : 0.1 }), r = sq ? 4.3 : 3.6;
+    mats.push(fm);
+    for (const sx0 of [-1, 1]) {
+      const ring = mesh(acc, new THREE.TorusGeometry(r, thin ? 0.38 : 0.75, 6, sq ? 4 : 20), fm, sx0 * 5.3, 10.9, 11.9, false);
+      if (sq) { ring.rotation.z = Math.PI / 4; ring.scale.set(wide, tall, 1); }
+      const lens = mesh(acc, new THREE.CircleGeometry(sq ? r * 0.78 : r, sq ? 4 : 18), new THREE.MeshBasicMaterial({ color: 0xdff3ff, transparent: true, opacity: thin ? 0.3 : 0.22, depthWrite: false }), sx0 * 5.3, 10.9, 11.8, false);
+      if (sq) { lens.rotation.z = Math.PI / 4; lens.scale.set(wide, tall, 1); }
+      mesh(acc, new THREE.BoxGeometry(0.7, 0.7, 11), fm, sx0 * 9.6, 11.2, 6.4, false);
+    }
+    mesh(acc, new THREE.BoxGeometry(3, 0.7, 0.7), fm, 0, 11.4, 11.9, false);
+  }
+  if (look.curls) {
+    // a head of curls: balls scattered over the scalp, leaving the face clear
+    const cm = std(look.curls, { roughness: 1 }), geo = new THREE.SphereGeometry(1, 8, 6);
+    mats.push(cm);
+    for (let i = 0, n = 64; i < n; i++) {
+      const y = 1 - (i / n) * 1.35, rr = Math.sqrt(Math.max(0, 1 - y * y)), ph = i * 2.39996, x = Math.cos(ph) * rr, z = Math.sin(ph) * rr;
+      if (z > 0.38 && y < 0.5) continue;
+      const b = mesh(acc, geo, cm, x * 10.6, 11.9 + y * 10.4, -0.4 + z * 10.6, false);
+      b.scale.setScalar(3.5 + ((i * 7) % 5) * 0.28);
+    }
+  }
+  selfLit(mats);
+  for (const m of mats) R.mats.push(m);
 }
 // The sun is nearly overhead, so faces turned to the camera sit in shade; a little of their own colour lifts them.
 function selfLit(mats) {
@@ -105,6 +155,7 @@ function aimWeapon(R, tilt, sweep) {
   R.g.updateMatrixWorld(true);
   R.hand.position.copy(R.g.worldToLocal(_wv.setFromMatrixPosition(R.fist.matrixWorld)));
   R.hand.rotation.set(-(Math.PI / 2 + tilt), sweep, 0);
+  if (R.acc) { headLocal(R).decompose(R.acc.position, R.acc.quaternion, _hs); R.acc.quaternion.multiply(R.headRest); }
 }
 function rigRobot(height, tint) {
   const src = R3.models.Robot, g = new THREE.Group(), c = cloneModel(src, true), k = height / src.userData.size.y;
@@ -188,37 +239,6 @@ R3.modelNature = function (W, trees, rocks) {
     bushes.push({ x, y, s: rand(18, 30), rot: i * 1.3 });
   }
   this.scatter(W, 'Bush_Common', bushes, false);
-};
-R3.modelBuilding = function (W, ob) {
-  const hq = !!ob.bld, name = hq ? HQ_MODELS[ob.bld] : SHED_MODELS[Math.abs(Math.round(ob.x + ob.y)) % SHED_MODELS.length];
-  const s = hq ? this.fit(name, ob.w * 0.6, 600, ob.d * 1.1) : this.fit(name, ob.w * 1.15, 200, ob.d * 1.5);
-  const c = this.place(W, name, ob.x + ob.w / 2, ob.y + ob.d / 2, s);
-  if (hq) {
-    // two annexes so the headquarters fills its lot
-    [-1, 1].forEach((sd, i) => {
-      const an = SHED_MODELS[(Object.keys(HQ_MODELS).indexOf(ob.bld) + i) % SHED_MODELS.length];
-      const a = this.place(W, an, ob.x + ob.w / 2 + sd * ob.w * 0.36, ob.y + ob.d * 0.58, this.fit(an, ob.w * 0.3, 240, ob.d * 0.8), sd * -0.25);
-      this.bld.push({ ob, g: a.g, mats: a.mats, a: 1, sy: a.g.scale.y });
-    });
-  }
-  const g = new THREE.Group();
-  g.position.set(ob.x + ob.w / 2, 0, ob.y + ob.d / 2);
-  for (const sx0 of [-1, 1]) {
-    const lamp = mesh(g, new THREE.SphereGeometry(7, 10, 8), this.lampMat, sx0 * (ob.w / 2 - 6), 46, ob.d / 2 + 14, false);
-    mesh(g, new THREE.BoxGeometry(3, 46, 3), std(0x4a3320), sx0 * (ob.w / 2 - 6), 23, ob.d / 2 + 14);
-    this.lamps.push({ x: g.position.x + lamp.position.x, y: g.position.z + lamp.position.z, h: 46 });
-  }
-  if (hq) {
-    const cv = document.createElement('canvas');
-    cv.width = 512; cv.height = 96;
-    const tex = new THREE.CanvasTexture(cv);
-    const post = std(0x4a3320);
-    for (const px of [-118, 118]) mesh(g, new THREE.BoxGeometry(7, 96, 7), post, px, 48, ob.d / 2 + 26);
-    mesh(g, new THREE.PlaneGeometry(260, 49), new THREE.MeshBasicMaterial({ map: tex, transparent: true }), 0, 96, ob.d / 2 + 31, false);
-    this.signs.push({ c: cv, tex, id: ob.bld, neon: THEMES[ob.bld].neon });
-  }
-  W.add(g);
-  this.bld.push({ ob, g: c.g, mats: c.mats, a: 1, sy: c.g.scale.y });
 };
 R3.modelDesk = function (W, ob) {
   const sz = this.models.table_medium_long.userData.size, th = THEMES[ob.theme];

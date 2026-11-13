@@ -80,6 +80,7 @@ const Input = {
       this.mouse.x = e.clientX; this.mouse.y = e.clientY;
       if (e.button === 0) { this.mouse.down = true; this.pressed.lclick = true; }
       if (e.button === 2) { this.mouse.rdown = true; this.pressed.rclick = true; }
+      if (e.button === 1) { this.pressed.mclick = true; e.preventDefault(); }
     });
     addEventListener('mouseup', (e) => { if (e.button === 0) this.mouse.down = false; if (e.button === 2) this.mouse.rdown = false; });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());

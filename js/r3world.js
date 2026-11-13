@@ -177,7 +177,7 @@ function disposeTree(o) {
   o.traverse((n) => {
     if (n.geometry && !n.geometry.userData.shared) n.geometry.dispose();
     const ms = n.material ? (Array.isArray(n.material) ? n.material : [n.material]) : [];
-    for (const m of ms) { if (m.map && !m.map.userData.shared) m.map.dispose(); if (!m.userData.shared) m.dispose(); }
+    for (const m of ms) { if (m.map && !m.map.userData.shared) m.map.dispose(); if (m.emissiveMap && !m.emissiveMap.userData.shared) m.emissiveMap.dispose(); if (!m.userData.shared) m.dispose(); }
   });
 }
 
@@ -331,54 +331,13 @@ R3.build = function () {
     W.add(gm);
   }
 
-  // --- buildings (the five HQs and the little sheds), desks, containers, shuttle stops ---
-  this.winMat = std(0x9cc4d6, { emissive: 0xffc56e, emissiveIntensity: 0, roughness: 0.3 });
+  // --- buildings (the five HQs and the field offices: see r3office.js), desks, containers, shuttle stops ---
+  this.glassMats = []; this.glassCache = new Map();
   this.lampMat = std(0xffb347, { emissive: 0xffa040, emissiveIntensity: 1.2 });
   for (const ob of G.obstacles) {
     if (ob.k !== 'box') continue;
     if (ob.desk) { this.desks.set(ob, useM ? this.modelDesk(W, ob) : this.makeDesk(W, ob)); continue; }
-    if (useM) { this.modelBuilding(W, ob); continue; }
-    const th = THEMES[ob.bld || 'shed'], g = new THREE.Group(), wallH = ob.h * 0.74;
-    g.position.set(ob.x + ob.w / 2, 0, ob.y + ob.d / 2);
-    const wt = TEX.wood.clone(), rt2 = TEX.roof.clone();
-    wt.needsUpdate = rt2.needsUpdate = true; wt.repeat.set(ob.w / 190, 1); rt2.repeat.set(4, 3);
-    const wall = std(th.wall, { roughness: 0.9, transparent: true, map: wt }), roof = std(th.roof, { roughness: 0.85, transparent: true, map: rt2 });
-    mesh(g, new THREE.BoxGeometry(ob.w, wallH, ob.d), wall, 0, wallH / 2, 0);
-    {
-      // a gable: two slopes meeting at a ridge that runs the length of the building
-      const hw = ob.w / 2 + 14, hd = ob.d / 2 + 18, rh = Math.min(ob.h * 0.42, ob.d * 0.6), ur = ob.w / 130;
-      const rg = new THREE.BufferGeometry();
-      rg.setAttribute('position', new THREE.Float32BufferAttribute([
-        -hw, 0, hd, hw, 0, hd, hw, rh, 0, -hw, 0, hd, hw, rh, 0, -hw, rh, 0,        // front slope
-        hw, 0, -hd, -hw, 0, -hd, -hw, rh, 0, hw, 0, -hd, -hw, rh, 0, hw, rh, 0,      // back slope
-        -hw, 0, -hd, -hw, 0, hd, -hw, rh, 0, hw, 0, hd, hw, 0, -hd, hw, rh, 0,       // gable ends
-      ], 3));
-      rg.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, ur, 0, ur, 1, 0, 0, ur, 1, 0, 1, 0, 0, ur, 0, ur, 1, 0, 0, ur, 1, 0, 1, 0, 0, 1, 0, 0.5, 1, 0, 0, 1, 0, 0.5, 1], 2));
-      rg.computeVertexNormals();
-      rt2.repeat.set(1, 2);
-      mesh(g, rg, roof, 0, wallH, 0);
-    }
-    const cols = Math.max(2, Math.floor(ob.w / 95)), door = !!ob.bld;
-    for (let i = 0; i < cols; i++) {
-      if (door && Math.abs(i - (cols - 1) / 2) < 1) continue;
-      mesh(g, new THREE.BoxGeometry((ob.w / cols) * 0.55, wallH * 0.32, 3), this.winMat, -ob.w / 2 + ((i + 0.5) * ob.w) / cols, wallH * 0.52, ob.d / 2 + 1, false);
-    }
-    if (door) mesh(g, new THREE.BoxGeometry(90, wallH * 0.56, 4), std(0x6b7688, { roughness: 0.5, metalness: 0.4 }), 0, wallH * 0.28, ob.d / 2 + 1, false);
-    for (const sx0 of [-1, 1]) {
-      const lamp = mesh(g, new THREE.SphereGeometry(7, 10, 8), this.lampMat, sx0 * (ob.w / 2 - 12), wallH * 0.62, ob.d / 2 + 12, false);
-      mesh(g, new THREE.BoxGeometry(2, 2, 14), std(0x4a3320), sx0 * (ob.w / 2 - 12), wallH * 0.62 + 9, ob.d / 2 + 6, false);
-      this.lamps.push({ x: g.position.x + lamp.position.x, y: g.position.z + lamp.position.z, h: lamp.position.y });
-    }
-    if (ob.bld) {
-      const c = document.createElement('canvas');
-      c.width = 512; c.height = 96;
-      const tex = new THREE.CanvasTexture(c);
-      const s = mesh(g, new THREE.PlaneGeometry(ob.w * 0.62, ob.w * 0.62 * (96 / 512)), new THREE.MeshBasicMaterial({ map: tex, transparent: true }), 0, wallH * 0.86, ob.d / 2 + 2.5, false);
-      s.receiveShadow = false;
-      this.signs.push({ c, tex, id: ob.bld, neon: th.neon });
-    }
-    W.add(g);
-    this.bld.push({ ob, g, mats: [wall, roof], a: 1 });
+    this.office(W, ob);
   }
   this.lang = null;
   for (const k of G.containers) this.conts.set(k, useM ? this.modelContainer(W, k) : this.makeContainer(W, k));
@@ -481,7 +440,7 @@ R3.light = function () {
   fog.color.set(0xa8c2a4).lerp(c.set(0xd9a070), d).lerp(c.set(0x8a4aa8), out * 0.5);
   fog.density = lerp(0.0005, 0.0007, d);
   this.scene.background.copy(fog.color);
-  this.winMat.emissiveIntensity = clamp((d - 0.3) * 2.2, 0, 1.4);
+  for (const m of this.glassMats) m.emissiveIntensity = 0.1 + clamp((d - 0.2) * 1.7, 0, 1.15); // office lights come on towards evening
   this.lampMat.emissiveIntensity = 1.0 + d * 1.6;
   // only the three lanterns nearest you actually cast light
   if (this.frameNo % 20 === 0 && this.lamps.length) {
@@ -501,7 +460,7 @@ R3.syncWorld = function (dt) {
     for (const s of this.signs) {
       const g = s.c.getContext('2d');
       g.clearRect(0, 0, 512, 96);
-      g.fillStyle = '#231d33'; g.beginPath(); g.roundRect(4, 8, 504, 80, 22); g.fill();
+      if (!s.bare) { g.fillStyle = '#231d33'; g.beginPath(); g.roundRect(4, 8, 504, 80, 22); g.fill(); }
       g.font = '900 52px "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillStyle = s.neon; g.fillText(T('fl_' + s.id), 256, 50, 480);
       s.tex.needsUpdate = true;

@@ -290,14 +290,14 @@ function drawPlayer(p) {
   shadow(p.x, p.y, p.r);
   if (p.charge > 0.2) {
     // winding up a spin attack: the ring shows how far it will reach
-    const c = p.charge / 1.2, ready = p.charge >= 0.45;
-    ctx.strokeStyle = ready ? `rgba(255,224,138,${0.6 + Math.sin(p.t * 22) * 0.3})` : 'rgba(255,255,255,0.4)'; ctx.lineWidth = ready ? 4 : 2;
-    groundEllipse(p.x, p.y, 115 + 55 * c); ctx.stroke();
+    const lv = chargeLevel(p.charge), ready = lv > 0;
+    ctx.strokeStyle = ready ? `rgba(255,${lv === 3 ? 150 : 224},${lv === 3 ? 70 : 138},${0.6 + Math.sin(p.t * 22) * 0.3})` : 'rgba(255,255,255,0.4)'; ctx.lineWidth = ready ? 3 + lv : 2;
+    groundEllipse(p.x, p.y, [100, 125, 155, 195][lv]); ctx.stroke();
     if (ready && rand() < 0.5) part(p.x + rand(-18, 18), p.y, rand(4, 50), { vz: rand(60, 160), life: 0.4, color: '#ffe08a', size: 4, grav: -80, round: true });
   }
   const w = WEAPONS[p.weapon];
   let wa = p.aim, ws = 1.25;
-  if (p.swingT > 0) { const k = 1 - p.swingT / p.swingMax; wa = p.swingA + lerp(-w.arc, w.arc, clamp(k * 1.6, 0, 1)) * (p.chain === 2 ? -1 : 1); ws = 1.5; }
+  if (p.swingT > 0) { const k = 1 - p.swingT / p.swingMax; wa = p.swingA + lerp(-w.arc, w.arc, clamp(k * 1.6, 0, 1)) * p.swingDir; ws = 1.5; }
   ctx.globalAlpha = p.inv > 0 && p.dashT <= 0 && Math.floor(p.t * 22) % 2 ? 0.4 : p.hidden ? 0.72 : 1;
   const lean = p.swingT > 0 ? Math.sin(clamp(1 - p.swingT / p.swingMax, 0, 1) * Math.PI) * 0.2 : p.moving && p.dashT <= 0 ? 0.07 : 0;
   lit(p.x, p.y, 0, 150, 130, (c) => { c.rotate(lean * p.face); drawPerson(c, Object.assign({}, PLAYER_LOOK, {
@@ -609,26 +609,26 @@ function drawMinimap(x, y, s) {
 function drawHUD() {
   const W = View.W, H = View.H, p = G.player, z = G.zone;
   const u = clamp(Math.min(W, H) / 720, 0.72, 1.25), narrow = W < 760, pad = 14 * u;
-  // hearts: 20 HP each
-  const hs = 11 * u, n = Math.ceil(p.maxhp / 20);
-  for (let i = 0; i < n; i++) {
-    const hx = pad + hs + i * hs * 2.5, hy = pad + hs, f = clamp((p.hp - i * 20) / 20, 0, 1);
-    heartPath(ctx, hx, hy, hs); ctx.fillStyle = '#3b3550'; ctx.fill();
-    if (f > 0) { ctx.save(); heartPath(ctx, hx, hy, hs); ctx.clip(); ctx.fillStyle = '#ff5a6e'; ctx.fillRect(hx - hs * 1.3, hy - hs, hs * 2.6 * f, hs * 2); ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.arc(hx - hs * 0.45, hy - hs * 0.25, hs * 0.22, 0, TAU); ctx.fill(); ctx.restore(); }
-    heartPath(ctx, hx, hy, hs); ctx.strokeStyle = INK; ctx.lineWidth = 2.4; ctx.lineJoin = 'round'; ctx.stroke();
+  const low = G.state === 'play' && p.hp > 0 && p.hp <= p.maxhp * 0.35, beat = 0.5 + 0.5 * Math.sin(G.t * 9);
+  if (low) {
+    // running low: the edges of the screen throb red
+    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.42, W / 2, H / 2, Math.max(W, H) * 0.72);
+    vg.addColorStop(0, 'rgba(255,40,60,0)'); vg.addColorStop(1, `rgba(255,40,60,${0.2 + beat * 0.22})`);
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
-  let ly = pad + hs * 2.6;
-  const bw = n * hs * 2.5 - hs * 0.5;
-  if (p.armor > 0) { bar(pad, ly, bw, 7 * u, p.armor / 100, '#6fb1ff'); hudText(T('armor'), pad + bw + 8 * u, ly + 4 * u, 10 * u, '#9cc9ff'); ly += 15 * u; }
-  ly += 6 * u;
-  ctx.save(); ctx.translate(pad + 10 * u, ly); ctx.scale(0.9 * u, 0.9 * u); drawWeapon(ctx, p.weapon, 1); ctx.restore();
-  hudText(T('w_' + p.weapon), pad + 26 * u, ly, 12 * u, TIER[WEAPONS[p.weapon].tier]);
-  ly += 22 * u;
-  ctx.save(); ctx.translate(pad + 7 * u, ly + 2 * u); ctx.scale(0.62 * u, 0.62 * u); drawLootIcon(ctx, { kind: 'tea' }); ctx.restore();
-  hudText('×' + p.tea + (Input.touch ? '' : '  [F]'), pad + 18 * u, ly, 12 * u, p.tea ? '#ffd0d6' : '#b8b2d0'); ly += 22 * u;
-  hudText(money(p.loot.value), pad, ly + 2 * u, 17 * u, '#ffe08a', 'left', 900);
-  let px = pad + ctx.measureText(money(p.loot.value)).width + 12 * u;
-  for (let i = 2; i < 6; i++) for (let k = 0; k < Math.min(p.loot.counts[i], 5); k++) { ctx.fillStyle = TIER[i]; ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(px, ly - 5 * u, 8 * u, 11 * u, 2); ctx.fill(); ctx.stroke(); px += 10 * u; }
+  // status: a weapon medallion, then glass gauges for health, stamina and the plaid shirt
+  const mr = 27 * u, mcx = pad + mr, mcy = pad + mr, gx = pad + mr * 2 + 8 * u, gw = clamp(W * 0.26, 120 * u, 215 * u);
+  plate(gx - 16 * u, pad + 3 * u, gw + 26 * u, (p.armor > 0 ? 52 : 42) * u, 12 * u);
+  tube(gx, pad + 9 * u, gw, 16 * u, p.hp / p.maxhp, low && beat > 0.5 ? '#ff9aa6' : '#ff6a7c', '#d92b48', 5, low ? beat : 0);
+  tube(gx, pad + 30 * u, gw * 0.8, 8 * u, p.sta / 100, p.staFlash > 0 ? '#ff7a6a' : '#ffe27a', p.staFlash > 0 ? '#c9302c' : '#e0a51e', 0, 0);
+  if (p.armor > 0) tube(gx, pad + 42 * u, gw * 0.6, 6 * u, p.armor / 100, '#a9d2ff', '#4a8fe0', 0, 0);
+  knob(mcx, mcy, mr, TIER[WEAPONS[p.weapon].tier], false);
+  ctx.save(); ctx.translate(mcx, mcy); ctx.scale(1.35 * u, 1.35 * u); ink(ctx, 1.6); drawWeapon(ctx, p.weapon, 1.2); ctx.restore();
+  let ly = pad + mr * 2 + 18 * u;
+  coin(pad + 10 * u, ly, 10 * u);
+  hudText(money(p.loot.value).replace(/^[¥$]/, ''), pad + 26 * u, ly + 1, 19 * u, '#ffe08a', 'left', 900);
+  let px = pad + 26 * u + ctx.measureText(money(p.loot.value).replace(/^[¥$]/, '')).width + 12 * u;
+  for (let i = 2; i < 6; i++) for (let k = 0; k < Math.min(p.loot.counts[i], 5); k++) { ctx.fillStyle = TIER[i]; ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(px, ly - 6 * u, 8 * u, 12 * u, 2); ctx.fill(); ctx.stroke(); px += 6 * u; }
   ly += 22 * u;
   if (p.hidden) { hudText(T('hud_hidden'), pad, ly, 11 * u, '#b9f59a'); ly += 18 * u; }
   // kill feed
@@ -636,21 +636,27 @@ function drawHUD() {
   for (const f of G.feed) { ctx.globalAlpha = clamp(f.t, 0, 1); hudText(f.text, pad, ly, 10.5 * u, f.color, 'left', 700); ly += 15 * u; }
   ctx.globalAlpha = 1;
 
-  // minimap + match status
+  // minimap in a bezel, with the headcount and the circle's clock as instruments under it (icons, not words)
   const ms = clamp(150 * u, 104, 190), mx = W - pad - ms;
+  plate(mx - 6, pad - 6, ms + 12, ms + 12 + 30 * u, 16);
   drawMinimap(mx, pad, ms);
-  hudText(`${T('hud_alive')} ${aliveRivals() + (p.hp > 0 ? 1 : 0)}`, mx, pad + ms + 14 * u, 12 * u, '#fff');
-  hudText(`${T('hud_kills')} ${G.kills}`, W - pad, pad + ms + 14 * u, 12 * u, '#ffe08a', 'right');
-  const zt = z.mode === 'hold' ? T('hud_zone_in', fmtTime(Math.max(0, z.t))) : z.mode === 'shrink' ? T('hud_zone_now') : T('hud_zone_done');
-  hudText(zt, W - pad, pad + ms + 32 * u, 11 * u, z.mode === 'hold' ? '#e9d5ff' : '#ff9df0', 'right');
+  const iy = pad + ms + 15 * u, shrink = z.mode === 'shrink';
+  glyph('person', mx + 12 * u, iy, 8 * u, '#fff');
+  hudText(String(aliveRivals() + (p.hp > 0 ? 1 : 0)), mx + 24 * u, iy + 1, 15 * u, '#fff', 'left', 900);
+  glyph('ko', mx + ms * 0.36, iy, 7 * u, '#ffe08a');
+  hudText(String(G.kills), mx + ms * 0.36 + 10 * u, iy + 1, 15 * u, '#ffe08a', 'left', 900);
+  const zt = z.mode === 'hold' ? fmtTime(Math.max(0, z.t)) : shrink ? '!!' : '--';
+  hudText(zt, W - pad - 3 * u, iy + 1, 13 * u * (shrink ? 1 + beat * 0.15 : 1), shrink ? '#ff9df0' : '#e9d5ff', 'right', 900);
+  glyph('ring', W - pad - 3 * u - ctx.measureText(zt).width - 9 * u, iy, 6 * u, shrink ? '#ff9df0' : '#e9d5ff');
 
-  // centre: boss bar
-  const b = G.boss, cyTop = narrow ? pad + ms + 56 * u : pad + 6 * u;
+  // centre: the boss's health in a framed tube, and under it how close they are to toppling
+  const b = G.boss, cyTop = narrow ? pad + ms + 64 * u : pad + 4 * u;
   if (b && !b.gone && !b.down) {
-    const w = narrow ? W - pad * 2 : Math.min(W * 0.36, 460), bx = (W - w) / 2;
-    hudText(T('n_' + b.id), W / 2, cyTop, 14 * u, '#fff', 'center', 900);
-    bar(bx, cyTop + 13 * u, w, 11 * u, b.hp / b.maxhp, '#ff5a5f');
-    hudText(T('t_' + b.id), W / 2, cyTop + 37 * u, 10 * u, '#fff', 'center', 600);
+    const w = narrow ? W - pad * 2 - 20 : Math.min(W * 0.36, 460), bx = (W - w) / 2;
+    plate(bx - 14 * u, cyTop + 12 * u, w + 28 * u, 38 * u, 12 * u);
+    hudText(T('n_' + b.id), W / 2, cyTop + 6 * u, 15 * u, '#fff', 'center', 900);
+    tube(bx, cyTop + 20 * u, w, 14 * u, b.hp / b.maxhp, '#ff8a70', '#d9342b', 10, 0);
+    tube(bx + w * 0.2, cyTop + 39 * u, w * 0.6, 5 * u, b.topple > 0 ? 1 : b.ko / b.koMax, '#fff3a0', '#ffc22e', 0, b.topple > 0 ? beat : 0);
   }
   if (p.outside && G.state === 'play') hudText(T('hud_outside'), W / 2, H * 0.24, 20 * u * (1 + Math.sin(G.t * 8) * 0.04), '#f3b8ff', 'center', 900);
 
@@ -721,17 +727,19 @@ function skillButtons() {
   const W = View.W, H = View.H;
   if (Input.touch) {
     return [
-      { id: 'atk', x: W - 80, y: H - 96, r: 46 }, { id: 'q', x: W - 192, y: H - 84, r: 28 }, { id: 'e', x: W - 164, y: H - 174, r: 28 },
-      { id: 'r', x: W - 86, y: H - 214, r: 31 }, { id: 'd', x: W - 236, y: H - 160, r: 24 }, { id: 'tea', x: W - 34, y: H - 284, r: 22 },
+      { id: 'atk', x: W - 78, y: H - 92, r: 44 }, { id: 'hvy', x: W - 172, y: H - 62, r: 32 }, { id: 'd', x: W - 160, y: H - 150, r: 27 },
+      { id: 'q', x: W - 76, y: H - 190, r: 26 }, { id: 'e', x: W - 252, y: H - 92, r: 26 }, { id: 'r', x: W - 238, y: H - 172, r: 29 },
+      { id: 'tea', x: W - 34, y: H - 262, r: 22 },
     ];
   }
-  const u = clamp(Math.min(W, H) / 720, 0.72, 1.25), gap = 66 * u, y = H - 52 * u, x0 = W / 2 - gap * 2;
-  const keys = { q: 'Q', e: 'E', r: 'R', d: 'Space', tea: 'F' };
-  return ['q', 'e', 'r', 'd', 'tea'].map((id, i) => ({ id, x: x0 + i * gap + (i > 2 ? 14 * u : 0), y, r: (id === 'r' ? 29 : i > 2 ? 22 : 26) * u, key: keys[id] }));
+  const u = clamp(Math.min(W, H) / 720, 0.72, 1.25), gap = 68 * u, y = H - 58 * u, x0 = W / 2 - gap * 2;
+  const keys = { q: 'Q', e: 'E', r: 'R', d: '␣', tea: 'F' };
+  return ['q', 'e', 'r', 'd', 'tea'].map((id, i) => ({ id, x: x0 + i * gap + (i > 2 ? 14 * u : 0), y, r: (id === 'r' ? 30 : i > 2 ? 23 : 27) * u, key: keys[id] }));
 }
 function drawSkillIcon(c, id) {
   ink(c, 1.6);
   if (id === 'atk') drawWeapon(c, G.player.weapon, 1.9);
+  else if (id === 'hvy') { c.rotate(0.9); drawWeapon(c, G.player.weapon, 1.5); c.rotate(-0.9); c.fillStyle = '#fff'; poly(c, [-13, 4, -4, 13, -15, 15], true); }
   else if (id === 'q') drawWeapon(c, 'pan', 1.5);
   else if (id === 'r') drawWeapon(c, 'book', 1.25);
   else if (id === 'tea') { c.scale(0.9, 0.9); drawLootIcon(c, { kind: 'tea' }); }
@@ -740,23 +748,156 @@ function drawSkillIcon(c, id) {
     for (const o of id === 'e' ? [-7, 3] : [-2]) poly(c, [o - 4, -10, o + 8, 0, o - 4, 10, o, 0], true);
   }
 }
+
+// ---------- the look of the HUD: things you could touch ----------
+// A dark metal plate that gauges and dials sit on.
+function plate(x, y, w, h, r) {
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.roundRect(x, y + 4, w, h, r); ctx.fill();
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, '#5a5470'); g.addColorStop(0.5, '#3b3550'); g.addColorStop(1, '#2a2438');
+  ctx.fillStyle = g; ctx.strokeStyle = INK; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.roundRect(x + 2.5, y + 2.5, w - 5, h - 5, Math.max(1, r - 2)); ctx.stroke();
+}
+// A glass tube of liquid: f is how full, ticks divides it, glow (0..1) makes it throb.
+function tube(x, y, w, h, f, top, bottom, ticks, glow) {
+  f = clamp(f, 0, 1);
+  if (glow > 0) { ctx.save(); ctx.shadowColor = top; ctx.shadowBlur = 8 + glow * 14; ctx.fillStyle = top; ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.fill(); ctx.restore(); }
+  ctx.fillStyle = INK; ctx.beginPath(); ctx.roundRect(x - 2.5, y - 2.5, w + 5, h + 5, h / 2 + 2.5); ctx.fill();
+  const bg = ctx.createLinearGradient(0, y, 0, y + h);
+  bg.addColorStop(0, '#120f1c'); bg.addColorStop(1, '#3a3450');
+  ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.fill();
+  ctx.save();
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.clip();
+  if (f > 0.004) {
+    const lg = ctx.createLinearGradient(0, y, 0, y + h);
+    lg.addColorStop(0, top); lg.addColorStop(1, bottom);
+    ctx.fillStyle = lg; ctx.fillRect(x, y, w * f, h);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(x + w * f - 2, y, 2, h);
+  }
+  ctx.fillStyle = 'rgba(20,16,30,0.45)';
+  for (let i = 1; i < ticks; i++) ctx.fillRect(x + (w * i) / ticks - 0.75, y, 1.5, h);
+  const gl = ctx.createLinearGradient(0, y, 0, y + h * 0.55);
+  gl.addColorStop(0, 'rgba(255,255,255,0.5)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gl; ctx.beginPath(); ctx.roundRect(x + h * 0.3, y + h * 0.1, w - h * 0.6, h * 0.42, h * 0.2); ctx.fill();
+  ctx.restore();
+}
+// A domed push-button in a metal ring.
+function knob(x, y, r, face, down) {
+  ctx.fillStyle = 'rgba(0,0,0,0.32)'; ctx.beginPath(); ctx.ellipse(x, y + r * 0.16 + 3, r * 1.02, r * 0.98, 0, 0, TAU); ctx.fill();
+  const rg = ctx.createLinearGradient(0, y - r, 0, y + r);
+  rg.addColorStop(0, '#fbf8ee'); rg.addColorStop(0.5, '#b9b3c7'); rg.addColorStop(1, '#6d6784');
+  ctx.fillStyle = rg; ctx.strokeStyle = INK; ctx.lineWidth = 2.6;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); ctx.stroke();
+  const fr = r * 0.82, fy = y + (down ? 1.5 : 0);
+  const fg = ctx.createRadialGradient(x - fr * 0.35, fy - fr * 0.45, fr * 0.1, x, fy, fr);
+  fg.addColorStop(0, shadeHex(face, 1.35)); fg.addColorStop(0.7, face); fg.addColorStop(1, shadeHex(face, 0.62));
+  ctx.fillStyle = fg; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.arc(x, fy, fr, 0, TAU); ctx.fill(); ctx.stroke();
+}
+function gloss(x, y, r) {
+  const g = ctx.createLinearGradient(0, y - r, 0, y);
+  g.addColorStop(0, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y - r * 0.42, r * 0.62, r * 0.36, 0, 0, TAU); ctx.fill();
+}
+function shadeHex(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgb(' + [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.min(255, Math.round(v * k))).join(',') + ')';
+}
+// The key that fires a button, drawn as a keycap.
+function keycap(x, y, label, u, hot) {
+  ctx.font = `900 ${Math.round(11 * u)}px ${FONT}`;
+  const w = Math.max(20 * u, ctx.measureText(label).width + 10 * u), h = 17 * u;
+  ctx.fillStyle = INK; ctx.beginPath(); ctx.roundRect(x - w / 2 - 1.5, y - h / 2 - 1.5, w + 3, h + 6, 5 * u); ctx.fill();
+  ctx.fillStyle = hot ? '#c9304a' : '#aaa3bd'; ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2 + 3, w, h, 4 * u); ctx.fill();
+  const g = ctx.createLinearGradient(0, y - h / 2, 0, y + h / 2);
+  g.addColorStop(0, hot ? '#ff9aa6' : '#ffffff'); g.addColorStop(1, hot ? '#ff5a6e' : '#e2ddec');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2, w, h, 4 * u); ctx.fill();
+  ctx.fillStyle = hot ? '#fff' : INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, x, y + 0.5);
+}
+function coin(x, y, r) {
+  ctx.fillStyle = '#a8740f'; ctx.strokeStyle = INK; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x, y + 2, r, 0, TAU); ctx.fill(); ctx.stroke();
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.4, 1, x, y, r);
+  g.addColorStop(0, '#fff3b8'); g.addColorStop(0.6, '#f2b01e'); g.addColorStop(1, '#c98a12');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#8a5a08'; ctx.font = `900 ${Math.round(r * 1.25)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('¥', x, y + 0.5);
+}
+// Small pictograms that stand in for labels.
+function glyph(kind, x, y, r, color) {
+  ctx.save();
+  ctx.translate(x, y); ctx.strokeStyle = INK; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+  if (kind === 'person') {
+    ctx.beginPath(); ctx.arc(0, -r * 0.45, r * 0.42, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-r * 0.8, r * 0.9); ctx.quadraticCurveTo(-r * 0.8, r * 0.05, 0, r * 0.05); ctx.quadraticCurveTo(r * 0.8, r * 0.05, r * 0.8, r * 0.9); ctx.closePath(); ctx.fill(); ctx.stroke();
+  } else if (kind === 'ko') {
+    ctx.lineWidth = r * 0.5 + 3; ctx.lineCap = 'round';
+    for (const c of [INK, color]) { ctx.strokeStyle = c; ctx.beginPath(); ctx.moveTo(-r * 0.6, -r * 0.6); ctx.lineTo(r * 0.6, r * 0.6); ctx.moveTo(r * 0.6, -r * 0.6); ctx.lineTo(-r * 0.6, r * 0.6); ctx.stroke(); ctx.lineWidth = r * 0.5; }
+  } else {
+    ctx.lineWidth = r * 0.36 + 3; ctx.beginPath(); ctx.arc(0, 0, r * 0.72, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = r * 0.36; ctx.beginPath(); ctx.arc(0, 0, r * 0.72, 0, TAU); ctx.stroke();
+  }
+  ctx.restore();
+}
+// A mouse with one button lit: how light and heavy attacks are shown on PC.
+function mouseHint(x, y, u, right, hot) {
+  const w = 20 * u, h = 30 * u;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2 + 3, w, h, w / 2); ctx.fill();
+  const g = ctx.createLinearGradient(0, y - h / 2, 0, y + h / 2);
+  g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#cfc9dc');
+  ctx.fillStyle = g; ctx.strokeStyle = INK; ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2, w, h, w / 2); ctx.fill(); ctx.stroke();
+  ctx.save();
+  ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2, w, h, w / 2); ctx.clip();
+  ctx.fillStyle = hot ? '#ffd24a' : right ? '#ff8a3c' : '#ff5a6e';
+  ctx.fillRect(right ? x : x - w / 2, y - h / 2, w / 2, h * 0.42);
+  ctx.restore();
+  ctx.beginPath(); ctx.moveTo(x, y - h / 2); ctx.lineTo(x, y - h * 0.08); ctx.moveTo(x - w / 2, y - h * 0.08); ctx.lineTo(x + w / 2, y - h * 0.08); ctx.stroke();
+  ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2, w, h, w / 2); ctx.stroke();
+}
+
 function drawSkills(u) {
-  const p = G.player;
+  const p = G.player, low = p.hp > 0 && p.hp <= p.maxhp * 0.35 && G.state === 'play', beat = 0.5 + 0.5 * Math.sin(G.t * 9);
+  const FACE = { r: '#f2b01e', hvy: '#ff8a3c', atk: '#ff5a6e', tea: '#ffd0d6', e: '#e8f6ff', q: '#fff6e0', d: '#f1eefb' };
   for (const b of skillButtons()) {
-    const max = b.id === 'tea' ? 1 : SKILL_CD[b.id] || 1, cd = b.id === 'tea' ? Math.max(0, p.teaCd) : b.id === 'atk' ? 0 : p.cd[b.id];
-    const ready = cd <= 0 && (b.id !== 'tea' || p.tea > 0);
-    ctx.fillStyle = !ready ? 'rgba(42,36,56,0.55)' : b.id === 'r' ? '#ffe9a8' : 'rgba(255,255,255,0.88)';
-    ctx.strokeStyle = b.id === 'r' && ready ? '#ffcf4a' : INK; ctx.lineWidth = b.id === 'r' && ready ? 4 : 3;
-    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill(); ctx.stroke();
-    ctx.save(); ctx.translate(b.x, b.y); ctx.scale(b.r / 27, b.r / 27); ctx.globalAlpha = ready ? 1 : 0.55; drawSkillIcon(ctx, b.id); ctx.restore();
+    const max = b.id === 'tea' ? 1 : SKILL_CD[b.id] || 1, cd = b.id === 'tea' ? Math.max(0, p.teaCd) : b.id === 'atk' || b.id === 'hvy' ? 0 : p.cd[b.id];
+    const short = (b.id === 'd' && p.sta < DODGE_COST) || (b.id === 'hvy' && p.sta < 12);
+    const ready = cd <= 0 && !short && (b.id !== 'tea' || p.tea > 0), urge = b.id === 'tea' && low && p.tea > 0;
+    const r = b.r * (urge ? 1.08 + beat * 0.12 : 1);
+    if (urge) { ctx.save(); ctx.shadowColor = '#ff3b55'; ctx.shadowBlur = 16 + beat * 22; ctx.fillStyle = '#ff3b55'; ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, TAU); ctx.fill(); ctx.restore(); }
+    knob(b.x, b.y, r, ready ? FACE[b.id] : '#4a4560', Input.keys['btn_' + b.id]);
+    ctx.save(); ctx.translate(b.x, b.y); ctx.scale(r / 29, r / 29); ctx.globalAlpha = ready ? 1 : 0.5; drawSkillIcon(ctx, b.id); ctx.restore();
+    if (ready) gloss(b.x, b.y, r * 0.82);
     if (cd > 0) {
-      ctx.fillStyle = 'rgba(42,36,56,0.62)';
-      ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.arc(b.x, b.y, b.r, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(cd / max, 0, 1)); ctx.closePath(); ctx.fill();
-      if (b.id !== 'tea') hudText(cd < 1 ? cd.toFixed(1) : String(Math.ceil(cd)), b.x, b.y, b.r * 0.7, '#fff', 'center', 900);
+      ctx.fillStyle = 'rgba(30,24,44,0.66)';
+      ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.arc(b.x, b.y, r * 0.82, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(cd / max, 0, 1)); ctx.closePath(); ctx.fill();
+      if (b.id !== 'tea') hudText(cd < 1 ? cd.toFixed(1) : String(Math.ceil(cd)), b.x, b.y, r * 0.72, '#fff', 'center', 900);
     }
-    if (b.key) hudText(b.key, b.x, b.y + b.r + 9 * u, 10 * u, '#fff', 'center');
-    if (b.key && b.id !== 'tea') hudText(T('sk_' + b.id), b.x, b.y - b.r - 9 * u, 9.5 * u, '#fff', 'center', 700);
-    if (b.id === 'tea') hudText('×' + p.tea, b.x + b.r * 0.8, b.y - b.r * 0.8, 11 * u, '#ffd0d6', 'center');
+    if (b.key) keycap(b.x, b.y + r + 12 * u - (urge ? beat * 4 * u : 0), b.key, u, urge);
+    if (b.id === 'tea') {
+      // how many are left, on a little badge
+      const bx = b.x + r * 0.78, by = b.y - r * 0.78, br = 9.5 * u;
+      ctx.fillStyle = p.tea ? '#ff5a6e' : '#6f6787'; ctx.strokeStyle = INK; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, TAU); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = `900 ${Math.round(12 * u)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(p.tea), bx, by + 0.5);
+    }
+  }
+  if (!Input.touch) {
+    // left of the bar: which mouse button is the light attack and which the heavy
+    const bs = skillButtons(), x = bs[0].x - bs[0].r - 62 * u, y = bs[0].y;
+    mouseHint(x, y, u, false, Input.mouse.down); mouseHint(x + 30 * u, y, u, true, p.mv && p.mv.cost && p.swingT > 0);
+  }
+  if (low) {
+    // the one thing to do right now, spelled out
+    const y = Input.touch ? View.H - 330 : View.H * 0.7, s = 1 + beat * 0.06;
+    if (p.tea > 0) {
+      const tx = T(Input.touch ? 'hud_drink_touch' : 'hud_drink');
+      ctx.font = `900 ${Math.round(22 * u * s)}px ${FONT}`;
+      const w = ctx.measureText(tx).width + (Input.touch ? 0 : 44 * u);
+      if (!Input.touch) keycap(View.W / 2 - w / 2 + 14 * u, y, 'F', u * 1.5, true);
+      hudText(tx, View.W / 2 + (Input.touch ? 0 : 22 * u), y, 22 * u * s, '#ff8fa0', 'center', 900);
+    } else hudText(T('hud_notea'), View.W / 2, y, 16 * u, '#ffb0bc', 'center', 800);
   }
 }
 
@@ -777,19 +918,31 @@ function showTitle() {
     <div class="kicker">${T('kicker')}</div>
     <h1>${T('title')}</h1>
     <h2>${T('title2')}</h2>
-    <p class="tag">${T('tagline')}</p>
     <button class="big" data-act="kits">${T('start')}</button>
-    <div class="bank">${T('bank')} <b>${money(Bank.money)}</b></div>
-    <p class="ctl">${T('ctl_desktop')}<br>${T('ctl_touch')}</p>
+    <div class="bank"><i></i><b>${money(Bank.money)}</b></div>
+    <div class="row"><button class="ghost" data-act="how">${T('how')}</button></div>
     ${optRow()}
     <p class="disc">${T('disclaimer')}</p>`);
+}
+// Controls and rules as pictures of keys, not paragraphs.
+const HOW_KEYS = [['WASD', 'k_move'], ['␣', 'k_dodge'], ['@L', 'k_light'], ['@R', 'k_heavy'], ['@L', 'k_charge'], ['Tab', 'k_lock'], ['Q E R', 'k_skill'], ['F', 'k_tea']];
+const HOW_COMBOS = [['LLL', 'c_chop'], ['LLH', 'c_upper'], ['HH', 'c_slam'], ['␣L', 'c_dash']];
+let howBack = 'menu';
+function showHow() {
+  const key = (k) => k.split(' ').map((x) => (x === '@L' ? `<kbd class="l">${T('m_l')}</kbd>` : x === '@R' ? `<kbd class="h">${T('m_r')}</kbd>` : `<kbd>${x}</kbd>`)).join('');
+  const seq = (q) => [...q].map((ch) => (ch === 'L' ? '<kbd class="l">●</kbd>' : ch === 'H' ? '<kbd class="h">◆</kbd>' : `<kbd>${ch}</kbd>`)).join('');
+  UI.show(() => `
+    <div class="kicker">${T('how')}</div>
+    <div class="keys">${HOW_KEYS.map(([k, t]) => `<div>${key(k)}<span>${T(t)}</span></div>`).join('')}</div>
+    <div class="keys combos">${HOW_COMBOS.map(([q, t]) => `<div>${seq(q)}<span>${T(t)}</span></div>`).join('')}</div>
+    <ul class="rules"><li>${T('rule_a')}</li><li>${T('rule_b')}</li><li>${T('rule_c')}</li></ul>
+    <button class="ghost" data-act="${howBack}">${T('back')}</button>`);
 }
 function showKits() {
   UI.show(() => `
     <div class="kicker">${T('kit_title')}</div>
-    <ul class="rules"><li>${T('rule0')}</li><li>${T('rule1')}</li><li>${T('rule2')}</li><li>${T('rule3')}</li><li>${T('rule4')}</li><li>${T('rule5')}</li></ul>
     <div class="perks">${KITS.map((k, i) => `<button class="perk" data-act="kit" data-i="${i}" ${Bank.money < k.cost ? 'disabled' : ''}><span class="ic">${k.icon}</span><b>${T('kit_' + k.id + '_n')}</b><small>${T('kit_' + k.id + '_d')}</small><em>${k.cost ? money(k.cost) : T('kit_free')}</em></button>`).join('')}</div>
-    <div class="bank">${T('bank')} <b>${money(Bank.money)}</b></div>
+    <div class="bank"><i></i><b>${money(Bank.money)}</b></div>
     <button class="ghost" data-act="menu">${T('menu')}</button>`);
 }
 function showResult() {
@@ -801,9 +954,8 @@ function showResult() {
     ['st_place', r.kind === 'extract' ? T('st_extracted') : '#' + r.place + ' / ' + G.total],
     ['st_kills', r.kills], ['st_signed', r.signed + ' / 5'], ['st_time', fmtTime(r.time)], ['st_bank', money(Bank.money)],
   ];
-  const line = pick(['dead1', 'dead2', 'dead3']);
   const head = r.kind === 'dead'
-    ? `<h1 class="red">${T('res_dead_title')}</h1><p class="story">${T('res_dead_sub', r.by || T('by_pve'))}</p><p class="story dim">${T(line)}</p>`
+    ? `<h1 class="red">${T('res_dead_title')}</h1><p class="story">${T('res_dead_sub', r.by || T('by_pve'))}</p>`
     : r.kind === 'extract'
       ? `<h1 class="green">${T('res_ex_title')}</h1><p class="story">${T('res_ex_sub')}</p>`
       : `<h1 class="gold">${T('res_win_title')}</h1><p class="story">${T('res_win_sub', money(r.bonus))}</p>`;
@@ -820,8 +972,8 @@ function showPause() {
   G.state = 'paused';
   UI.show(() => `
     <h1>${T('paused')}</h1>
-    <p class="ctl">${T('ctl_desktop')}<br>${T('ctl_touch')}</p>
     <button class="big" data-act="resume">${T('resume')}</button>
+    <div class="row"><button class="ghost" data-act="how2">${T('how')}</button></div>
     ${optRow()}
     <button class="ghost" data-act="menu">${T('quit')}</button>`);
 }
@@ -836,6 +988,9 @@ function onAction(act, el) {
   else if (act === 'fx') { Settings.fx = !Settings.fx; Settings.save(); UI.refresh(); }
   else if (act === 'mode') { R3.on = Settings.mode3d = !R3.on; Settings.auto = false; Settings.save(); UI.refresh(); }
   else if (act === 'menu') showTitle();
+  else if (act === 'how') { howBack = 'menu'; showHow(); }
+  else if (act === 'how2') { howBack = 'pause'; showHow(); }
+  else if (act === 'pause') showPause();
   else if (act === 'resume') { G.state = 'play'; UI.hide(); }
 }
 

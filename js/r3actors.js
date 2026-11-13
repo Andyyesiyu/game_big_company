@@ -203,6 +203,41 @@ R3.makeEnemyRig = function (e) {
   if (M && e.type === 'gpt') return rigRobot(50, '#f2f2ec');
   return rigCreature(e.type);
 };
+// The player's body language for each move. The clip moves the arms; this leans, twists, hops and rolls
+// the whole body and carries the weapon through its arc.
+const ease = (x) => x * x * (3 - 2 * x);
+function posePlayer(R, p, dt) {
+  const I = R.inner, m = p.mv, sw = p.swingT > 0 && m ? clamp(1 - p.swingT / p.swingMax, 0, 1) : -1, lv = chargeLevel(p.charge);
+  let rx = 0, ry = 0, hop = 0, tilt = 0.85, sweep = 0.25, roll = 0, push = 0;
+  const punch = () => animSet(R, 'Punch', { once: true, key: p.swingN, speed: 0.75 / (p.swingMax * 1.3), fade: 0.04 });
+  if (p.dashT > 0 && p.dashKind === 'd') { roll = clamp(1 - p.dashT / 0.22, 0, 1) * TAU; animSet(R, 'Idle'); tilt = 0.2; }
+  else if (p.dashT > 0) { rx = 0.5; tilt = 0.05; sweep = 0; animSet(R, 'Walk', { speed: 3.2 }); }
+  else if (p.castT > 0 && p.castKind === 'spin') {
+    ry = (1 - p.castT / (p.castMax || 0.18)) * TAU * (p.castMax > 0.25 ? 2 : 1); tilt = 0.08; sweep = 1.5; rx = 0.12;
+    animSet(R, 'Punch', { once: true, key: 'spin', speed: 3 });
+  } else if (sw >= 0) {
+    const k = m.kind, at = m.at, pre = clamp(sw / at, 0, 1), post = clamp((sw - at) / (1 - at), 0, 1), cut = Math.min(1, post * 3.2);
+    if (k === 'sweep') { punch(); ry = p.swingDir * lerp(-0.6, 0.6, ease(sw)); rx = 0.1; tilt = lerp(1.2, 0.1, sw); sweep = p.swingDir * lerp(-1.35, 1.35, ease(sw)); }
+    else if (k === 'thrust') { punch(); rx = 0.36; ry = lerp(-0.7, 0, ease(pre)); tilt = 0.04; sweep = 0; push = sw < at ? -8 * pre : 20 * (1 - post); }
+    else {
+      // big overhead moves: arms go up for the wind-up, then come down with the blow
+      if (sw < at) animSet(R, 'Victory', { key: 'w' + p.swingN, speed: 2.2, fade: 0.06 }); else punch();
+      sweep = 0;
+      if (k === 'chop') { tilt = sw < at ? lerp(1.2, 2.05, ease(pre)) : lerp(2.05, -0.35, cut); rx = sw < at ? -0.22 * pre : lerp(-0.22, 0.5, cut); hop = Math.sin(pre * Math.PI) * 8; }
+      else if (k === 'upper') { tilt = sw < at ? lerp(0.4, -0.7, ease(pre)) : lerp(-0.7, 2.05, cut); rx = sw < at ? 0.4 * pre : lerp(0.4, -0.3, cut); hop = sw < at ? -4 * pre : Math.sin(Math.min(1, post * 1.5) * Math.PI) * 18; if (sw >= at) animSet(R, 'Victory', { key: 'u' + p.swingN, speed: 2.4, fade: 0.05 }); }
+      else { hop = Math.sin(clamp(sw / (at + 0.03), 0, 1) * Math.PI) * 56; tilt = sw < at * 0.8 ? lerp(1.0, 2.15, ease(sw / (at * 0.8))) : lerp(2.15, -0.45, clamp((sw - at * 0.8) / (at * 0.22), 0, 1)); rx = sw < at * 0.8 ? -0.32 * pre : sw < at ? 0.6 : lerp(0.6, 0.15, post); }
+    }
+  } else if (p.charge > 0.3) { animSet(R, 'Victory', { speed: 1.6 }); tilt = 1.75; sweep = -0.5; rx = -0.12; ry = -0.45; hop = -3 - lv; }
+  else if (p.castT > 0) animSet(R, 'Victory', { speed: 1.6 });
+  else if (p.moving) { animSet(R, 'Walk', { speed: 2.1 }); rx = 0.12; }
+  else animSet(R, 'Idle');
+  I.rotation.set(roll || rx, ry, 0);
+  const h = 32;
+  I.position.set(0, R.by + (roll ? h - h * Math.cos(roll) : hop), roll ? -h * Math.sin(roll) : 0);
+  R.mixer.update(dt);
+  aimWeapon(R, tilt, sweep);
+  R.hand.position.z += push;
+}
 const yaw = (a) => Math.PI / 2 - a; // world angle -> three rotation about Y for a rig that faces +z
 R3.rigFor = function (e, make) {
   let R = this.ents.get(e);
@@ -223,23 +258,17 @@ R3.syncActors = function (dt) {
     R.g.visible = !(p.inv > 0 && p.dashT <= 0 && Math.floor(p.t * 22) % 2);
     setWeapon(R, p.weapon);
     R.g.position.set(p.x, 0, p.y);
-    R.g.rotation.y = yaw(p.swingT > 0 ? p.swingA : p.aim);
+    R.g.rotation.y = yaw(p.dashT > 0 && p.dashKind === 'd' && R.model ? Math.atan2(p.dashDir.y, p.dashDir.x) : p.swingT > 0 ? p.swingA : p.aim);
     if (R.model) {
-      if (p.swingT > 0) animSet(R, 'Punch', { once: true, key: p.swingN, speed: 0.75 / (p.swingMax * 1.3), fade: 0.04 });
-      else if (p.castT > 0 || p.charge > 0.3) animSet(R, 'Victory', { speed: 1.6 });
-      else if (p.dashT > 0) animSet(R, 'Walk', { speed: 3.2 });
-      else if (p.moving) animSet(R, 'Walk', { speed: 2.1 });
-      else animSet(R, 'Idle');
-      R.inner.rotation.x = p.dashT > 0 ? 0.45 : p.moving ? 0.12 : 0;
-      R.mixer.update(dt);
-      const sw = p.swingT > 0 ? 1 - p.swingT / p.swingMax : -1;
-      aimWeapon(R, sw >= 0 ? lerp(1.25, 0.1, sw) : p.charge > 0.3 ? 1.5 : 0.85, sw >= 0 ? (p.chain === 2 ? -1 : 1) * lerp(-1.25, 1.25, sw * sw * (3 - 2 * sw)) : 0.25);
-    } else poseRig(R, { t: p.t, moving: p.moving, pace: 15, swing: p.swingT > 0 ? 1 - p.swingT / p.swingMax : null, dir: p.chain === 2 ? -1 : 1, armUp: p.castT > 0 || p.charge > 0.3 });
+      posePlayer(R, p, dt);
+    } else poseRig(R, { t: p.t, moving: p.moving, pace: 15, swing: p.swingT > 0 ? 1 - p.swingT / p.swingMax : null, dir: p.swingDir, armUp: p.castT > 0 || p.charge > 0.3 });
     for (const m of R.mats) { m.transparent = p.hidden; m.opacity = p.hidden ? 0.6 : 1; }
     if (p.charge > 0.2) {
-      const c = p.charge / 1.2, ready = p.charge >= 0.45, ring = this.get('charge', () => flat(GEO.ringThin, glowMat(0xffe08a)));
-      ring.position.set(p.x, 2.6, p.y); ring.scale.setScalar(115 + 55 * c);
-      ring.material.opacity = ready ? 0.7 + Math.sin(p.t * 22) * 0.3 : 0.3;
+      // the ring shows how far the release will reach; it steps out and changes colour at each charge level
+      const lv = chargeLevel(p.charge), ring = this.get('charge', () => flat(GEO.ringThin, glowMat(0xffe08a)));
+      ring.position.set(p.x, 2.6, p.y); ring.scale.setScalar([100, 125, 155, 195][lv] * (1 + p.chargeFlash * 1.2));
+      ring.material.color.setHex(lv === 3 ? 0xff8a3a : lv === 2 ? 0xffc04a : 0xffe08a);
+      ring.material.opacity = lv ? 0.7 + Math.sin(p.t * (14 + lv * 6)) * 0.3 : 0.3;
     }
   } else if (this.playerRig) this.playerRig.g.visible = false;
 
@@ -300,6 +329,8 @@ R3.syncActors = function (dt) {
     R.g.rotation.z = b.stun > 0 ? Math.sin(t * 16) * 0.14 : 0;
     if (R.model) {
       if (b.down) animSet(R, 'SitDown', { once: true });
+      else if (b.topple > 1.2) animSet(R, 'Defeat', { once: true, speed: 2.6 });
+      else if (b.topple > 0) animSet(R, 'StandUp', { once: true, speed: 1.15 });
       else if (b.stun > 0) animSet(R, 'RecieveHit');
       else if (b.charge > 0 || b.shield) animSet(R, 'Victory', { speed: 1.4 });
       else if (b.moving) animSet(R, 'Walk', { speed: 1.3 });
@@ -463,7 +494,7 @@ R3.syncActors = function (dt) {
 };
 
 R3.makeBossRig = function (b) {
-  const R = this.models ? rigChar(BOSS_MODELS[b.id], 1.45) : rigPerson(b.def.look, 1.45), gold = std(0xd4a017, { metalness: 0.7, roughness: 0.3, emissive: 0xffc94a, emissiveIntensity: 0.4 });
+  const L = BOSS_LOOK[b.id], R = this.models ? rigChar(L.model, L.sc, L.skin, L) : rigPerson(b.def.look, 1.45), gold = std(0xd4a017, { metalness: 0.7, roughness: 0.3, emissive: 0xffc94a, emissiveIntensity: 0.4 });
   R.mats.push(gold);
   const part = (parent, geo, mat, s, x, y, z) => { const m = mesh(parent, geo, mat, x, y, z); m.scale.set(s[0], s[1], s[2]); R.mats.includes(mat) || R.mats.push(mat); return m; };
   if (b.id === 'pony') { R.glow = part(R.hand, GEO.box, gold, [10, 13, 10], 0, -2, 0); ['#e040fb', '#448aff', '#ff5252', '#ffab40', '#69f0ae'].forEach((c, i) => part(R.hand, GEO.ball, std(c, { emissive: c, emissiveIntensity: 1.5 }), [1.6, 1.6, 1.6], -4 + i * 2, -2, 5.4)); }
@@ -476,7 +507,7 @@ R3.makeBossRig = function (b) {
   const steel = std(0x9aa5ad, { metalness: 0.85, roughness: 0.3 });
   const bodyM = mesh(tr, new THREE.CylinderGeometry(30, 38, 110, 3, 1), steel, 0, 34, 0); bodyM.rotation.set(Math.PI / 2, 0, Math.PI); bodyM.scale.set(1.25, 1, 0.9);
   for (const x of [-34, 34]) for (const z of [-34, 34]) { const w = mesh(tr, GEO.cyl, std(0x111111), x, 13, z); w.scale.set(13, 10, 13); w.rotation.z = Math.PI / 2; }
-  tr.scale.setScalar(1 / 1.45); tr.visible = false;
+  tr.scale.setScalar(1 / R.sc); tr.visible = false;
   R.g.add(tr);
   return R;
 };

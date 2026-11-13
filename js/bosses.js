@@ -17,7 +17,7 @@ function makeBoss(id, home) {
   const b = {
     id, def: d, home, x: home.x + home.w / 2, y: home.y + 130, z: 0, r: 24, hp: d.hp, maxhp: d.hp, t: rand(10), face: 1,
     q: [], busy: 0, cool: 1.6, phase: 1, flash: 0, say: null, sayT: 0, mode: 'orbit', orbitDir: pick([-1, 1]),
-    stun: 0, last: -1, contactCd: 0, crowd: 0, kx: 0, ky: 0, charge: 0, reflect: 0, shield: null, data: {}, moving: false, met: false,
+    stun: 0, ko: 0, koMax: 150, topple: 0, last: -1, contactCd: 0, crowd: 0, kx: 0, ky: 0, charge: 0, reflect: 0, shield: null, data: {}, moving: false, met: false,
   };
   if (d.init) d.init(b);
   return b;
@@ -42,6 +42,20 @@ function damageBoss(b, d) {
   b.hp -= d;
   b.flash = 0.08;
   if (b.hp <= 0) bossDown(b);
+}
+
+// Heavy blows build towards a topple: the boss goes down for a few seconds and takes extra damage.
+function addKo(b, v) {
+  if (b.stun > 0 || b.shield || b.gone || b.down || b.inv) return;
+  b.ko += v;
+  if (b.ko < b.koMax) return;
+  b.ko = 0; b.koMax = Math.round(b.koMax * 1.3);
+  b.mode = 'orbit'; b.stun = b.topple = 3.2; b.busy = 0; b.cool = 0.4; b.q = []; b.charge = 0; b.reflect = 0;
+  floater(b.x, b.y, 140, T('toppled'), '#ffe14d', 30, 1.5);
+  ring(b.x, b.y, 120, '#ffe14d', 0.5);
+  burst(b.x, b.y, 50, 26, ['#ffe14d', '#fff', '#ffb347'], { sp: 320, up: 300, life: 0.8, size: 7 });
+  G.hitstop = Math.max(G.hitstop, 0.2); View.shake = Math.max(View.shake, 14);
+  Sfx.play('boom');
 }
 
 function bossDown(b) {
@@ -91,7 +105,9 @@ function updateBoss(dt) {
     const ph = 1 + d.phaseAt.filter((f) => b.hp / b.maxhp <= f).length;
     if (ph > b.phase) { b.phase = ph; if (d.onPhase) d.onPhase(b); }
   }
+  b.topple = Math.max(0, b.topple - dt);
   if (b.stun > 0) { b.stun -= dt; b.moving = false; return; }
+  b.ko = Math.max(0, b.ko - 3 * dt);
   b.moving = false;
   if (b.mode === 'orbit') {
     const a = angTo(p.x, p.y, b.x, b.y) + b.orbitDir * 0.5;

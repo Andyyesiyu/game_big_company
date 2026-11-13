@@ -26,20 +26,36 @@ node tools/build-standalone.js
 | | PC | Phone |
 |---|---|---|
 | Move | WASD / arrow keys | left stick |
-| Attack | left-click: tap for the three-hit combo, hold to charge a spin attack | attack button: tap to combo, hold to charge |
-| Dodge | Space (no direction held = hop backwards) | dodge button |
-| Lock on | right-click or Tab | automatic (nearest target) |
+| Light attack | left-click (hold to charge) | big red button (hold to charge) |
+| Heavy attack | right-click | orange button |
+| Dodge roll | Space (no direction held = roll backwards) | dodge button |
+| Lock on | Tab or middle-click | automatic (nearest target) |
 | Skills | Q, E (or Shift), R; aimed at your lock or the cursor | skill buttons: tap to auto-aim, or drag to aim |
 | Drink bubble tea (+50 HP) | F | tea button |
 | Pause | Esc | ⏸ |
 
 ## Combat
 
-- **Attack** is a three-hit combo; the third hit is bigger, wider and knocks back. You step
-  in automatically to close the gap. **Hold** attack to wind up a spin that launches
-  everything around you.
-- **Dodge** gives a moment of invulnerability. Dodge just as an attack is about to land
-  and it is a **perfect dodge**: the world drops into slow motion while you keep full speed.
+The moveset borrows its shape from hunting-action games: committed swings, two attack
+buttons that branch, a stamina bar, and big monsters you can knock over.
+
+- **Light, light, light**: two sweeps and an overhead chop. (The stapler is quick and gets a
+  fourth hit.)
+- **Heavy** branches off wherever you are in the string: on its own it is a lunging
+  **thrust**; after two lights it is a **launcher** that throws the target into the air;
+  after a chop or another heavy it is a **leaping slam** with a shockwave.
+- **Hold** light attack to charge through three levels, then release for a spin that grows
+  with each level.
+- **Stamina** (the yellow tube) pays for dodges, heavy attacks and charging, and comes back
+  after a moment's rest.
+- **Dodge** is a roll with a moment of invulnerability. Roll just as an attack is about to
+  land and it is a **perfect dodge**: the world drops into slow motion, stamina comes back,
+  and your next hit is a **counter** for extra damage. Attack straight out of any roll for
+  a **dash cut**.
+- **Toppling a boss.** Heavy hits fill the yellow bar under the boss's health. Fill it and
+  the boss falls over for three seconds and takes half as much damage again.
+- When your health is in the red the screen edge pulses, the bubble-tea button throbs and
+  a prompt tells you to drink.
 - **Q · Pass the Blame**: throw a wok in a line; the first thing it hits is stunned.
 - **E · Clock-in Dash**: dash through enemies, hitting each once. Invulnerable mid-dash.
 - **R · Labor Arbitration**: a very large Labor Law book lands on the target area and stuns.
@@ -90,13 +106,16 @@ colour run from noon to dusk over a match, exponential fog, instanced wind-swaye
 lanterns that light up towards evening, and a final full-screen shader that adds bloom,
 sun shafts, the colour grade and grain.
 
-The people, robots, trees, rocks, buildings, desks and loot containers are free CC0
-models (see [CREDITS.md](CREDITS.md)), packed into `assets/models.js` and loaded by
-`js/r3models.js`. Everyone shares one skeleton and one set of animation clips (idle,
+The people, robots, trees, rocks, desks, loot containers, street lights and parked cars are
+free CC0 models (see [CREDITS.md](CREDITS.md)), packed into `assets/models.js` and loaded
+by `js/r3models.js`. The five bosses are those same bodies recoloured, with glasses and
+hair added in code. The buildings are modern offices built in code (`js/r3office.js`):
+glass curtain walls whose windows light up towards evening, and one silhouette per
+company. Everyone shares one skeleton and one set of animation clips (idle,
 walk, punch, hit, defeat, sit, cheer). The office weapons, the penguins, Doubao, the crab
 and the drones are still built in code, as are the ground textures. If the model bundle
 is missing or fails to decode, the renderer keeps its built-in capsule-and-box shapes.
-Trees and buildings between you and the camera shrink or turn glassy so you stay visible.
+Trees and buildings between you and the camera sink out of the way so you stay visible.
 The HUD, name tags and damage numbers are a 2D canvas layered on top.
 
 **2D (fallback).** The earlier Canvas 2D renderer (`js/draw.js`, plus the optional WebGL
@@ -113,8 +132,9 @@ with the Graphics button in the menu.
 | `js/post.js` | the WebGL lighting pass for the 2D renderer |
 | `js/r3world.js` | 3D renderer: scene, procedural textures, static world, camera, sun and fog, post shader |
 | `js/r3actors.js` | 3D renderer: character and creature rigs, per-frame sync of everything that moves, effects, the 2D overlay |
-| `js/r3models.js` | 3D renderer: loads the model library, animated character rigs, model trees, buildings, desks and containers |
-| `assets/models.js` | the model library: 32 trimmed GLB files as base64 (about 8 MB), so the game still runs from `file://` |
+| `js/r3models.js` | 3D renderer: loads the model library, animated character rigs, the bosses' looks, model trees, desks and containers |
+| `js/r3office.js` | 3D renderer: the office buildings (curtain-wall textures, lobbies, the five headquarters) |
+| `assets/models.js` | the model library: 26 trimmed GLB files as base64 (about 7 MB), so the game still runs from `file://` |
 | `tools/build-models.mjs` | how `assets/models.js` was made from the source packs (needs the downloads listed in CREDITS.md) |
 | `vendor/` | Three.js r149 plus its glTF loader and SkeletonUtils (MIT), vendored so the game runs offline |
 | `js/world.js` | game state, map generation, action combat (combos, skills, hit feel), loot, rivals' AI, the circle, hazards, sidekicks |

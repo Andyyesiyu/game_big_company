@@ -12,7 +12,7 @@ attribution is required. Credit where it is due anyway:
 | Trees, pine, bushes, rocks | Stylized Nature MegaKit | [Quaternius](https://quaternius.com) | opengameart.org |
 | Chest, crate | KayKit Dungeon Remastered | [Kay Lousberg](https://kaylousberg.com) | github.com/KayKit-Game-Assets |
 | Desk, cabinet | KayKit Furniture Bits | [Kay Lousberg](https://kaylousberg.com) | github.com/KayKit-Game-Assets |
-| Headquarters and field-office buildings | KayKit Medieval Hexagon Pack | [Kay Lousberg](https://kaylousberg.com) | github.com/KayKit-Game-Assets |
+| Street lights, parked cars | KayKit City Builder Bits | [Kay Lousberg](https://kaylousberg.com) | github.com/KayKit-Game-Assets |
 | Robots (AI agents, the GPT sidekick) | RobotExpressive | Tomás Laulhé, modified by Don McCurdy | three.js examples |
 
 The models were trimmed for size with `tools/build-models.mjs`: unused animation clips
@@ -24,5 +24,5 @@ at load time (skin tones, robot tints, green bushes).
 - [three.js](https://threejs.org) r149, with `GLTFLoader` and `SkeletonUtils` from its
   examples — MIT licence, see `vendor/three.LICENSE`.
 
-Everything else (game code, office weapons, penguins, Doubao, the crab, drones, textures,
-sound) is made in this repository.
+Everything else (game code, office buildings, office weapons, the bosses' glasses and hair,
+penguins, Doubao, the crab, drones, textures, sound) is made in this repository.
