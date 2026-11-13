@@ -71,8 +71,8 @@ function bossDown(b) {
   Sfx.play('win');
   G.signed++;
   View.shake = 14;
-  // a signature is worth a lot: a big step towards the next grade, a full heal, and a stamp you keep
-  gainXp(160); G.player.hp = G.player.maxhp;
+  // a signature is worth a lot: a big step towards the next grade, most of your health back, and a stamp you keep
+  gainXp(160); healPlayer(Math.round(G.player.maxhp * 0.6));
   if (!Bank.ceo.includes(b.id)) { Bank.ceo.push(b.id); Bank.save(); }
   // the red item: a signed N+1 agreement, plus whatever was in their pockets
   dropItem(b.x, b.y + 20, { kind: 'val', key: 'v_n1', tier: 5, value: 60000 });
@@ -143,7 +143,7 @@ function updateBoss(dt) {
     if (deck.length > 1 && deck[i][0] === b.last) i = (i + 1) % deck.length;
     b.last = deck[i][0];
     b.busy = deck[i][0](b);
-    b.cool = d.rest * (b.phase > 1 ? 0.75 : 1);
+    b.cool = d.rest * (b.phase > 1 ? 0.75 : 1) * (G.run ? 1 - BOSS_PACE * G.run.floor : 1);
   }
 }
 

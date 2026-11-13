@@ -66,8 +66,8 @@ buttons that branch, a stamina bar, and big monsters you can knock over.
 - **E · Clock-in Dash**: dash through enemies, hitting each once. Invulnerable mid-dash.
 - **R · Labor Arbitration**: a very large Labor Law book lands on the target area and stuns.
 - Hits land with hit-stop, screen shake, knockback, crits and a combo counter.
-- Health creeps back when nothing has hit you for a few seconds, and only two rivals
-  (three on the last two floors) press the attack at once; the rest circle and wait.
+- Health creeps back, up to half, when nothing has hit you for a few seconds, and only two
+  rivals (three from the third floor) press the attack at once; the rest circle and wait.
 - Rivals fight in melee too. A red wedge on the ground shows where a swing is about to
   land; senior rivals telegraph a dash strike with a red line. Step out or dodge.
 
@@ -106,7 +106,8 @@ English and 中文 are both built in (toggle on the title screen).
   choice that counts double. There are nineteen (damage, attack speed, crits, life on hit,
   stamina, cooldowns, extra woks for Q, a harder E, a bigger R, and so on) and each can be
   taken a few times. They last until the run ends. The pause menu shows what you hold.
-- **Between stages.** A cleared wave heals a little; a signature heals you fully, and
+- **Between stages.** A cleared wave heals a little and a signature heals 60%; resting only
+  brings you back to half, so the rest comes from bubble tea and upgrades. After a signature
   everything left on the floor flies to you. Then the shuttle pulls up south of the plaza:
   stand at the stop and it takes you to the next company.
 - **The objective** is always on screen under your health: how much of the wave is left

@@ -302,7 +302,7 @@ function makePlayer() {
 function hurtPlayer(d, force, src) {
   const p = G.player;
   if (G.state !== 'play' || p.hp <= 0 || p.inv > 0 || (p.dashT > 0 && !force)) return false;
-  d *= 0.8 * (G.run ? 1 + 0.12 * G.run.floor : 1); // everything hits a bit softer than it looks, and a bit harder each floor up
+  if (G.run) d *= 0.95 * (1 + 0.15 * G.run.floor); // every floor up, everything hits harder
   if (p.armor > 0) { const ab = Math.min(p.armor, d * 0.55); p.armor -= ab; d -= ab; }
   p.hp -= d; p.regenT = 0;
   p.inv = 0.45; p.hurtT = 0.3;
@@ -626,7 +626,8 @@ function updatePlayer(dt) {
   for (const k in p.cd) p.cd[k] = Math.max(0, p.cd[k] - dt);
   if ((G.comboT -= dt) <= 0) G.combo = 0;
   // catch your breath: health creeps back once nothing has hit you for a while
-  if ((p.regenT += dt) > 6 && p.hp > 0 && p.hp < p.maxhp) p.hp = Math.min(p.maxhp, p.hp + 2.5 * dt);
+  // (only up to half: the rest has to come from bubble tea, upgrades and signatures, or waiting would be free)
+  if ((p.regenT += dt) > 6 && p.hp > 0 && p.hp < p.maxhp * 0.5) p.hp = Math.min(p.maxhp * 0.5, p.hp + 2.5 * dt);
   const free = p.castT <= 0 && p.dashT <= 0;
   const stick = Input.moveVec();
   let mx = stick.x, my = stick.y;
@@ -1018,7 +1019,7 @@ function rivalThink(e) {
     if (o === e || o.type !== 'rival' || o.dead || o.ranged || o.dummy) continue;
     if (o.wind > 0 || o.dashWind > 0 || o.dashT > 0 || dist(o.x, o.y, p.x, p.y) < d) ahead++;
   }
-  e.wait = !e.ranged && ahead >= (G.run && G.run.floor >= 3 ? 3 : 2);
+  e.wait = !e.ranged && ahead >= (G.run && G.run.floor >= 2 ? 3 : 2);
 }
 
 function updateRival(e, dt) {
@@ -1054,7 +1055,7 @@ function updateRival(e, dt) {
     return;
   }
   if (e.dashWind > 0) { if ((e.dashWind -= dt) <= 0) { e.dashT = 0.22; e.dashHit = false; if (onScreen(e.x, e.y, 100)) Sfx.play('dash'); } e.moving = false; return; }
-  if (e.wind > 0) { e.aim = e.windA; e.moving = false; if ((e.wind -= dt) <= 0) { rivalSwing(e); e.atkCd = rand(0.7, 1.1); } return; }
+  if (e.wind > 0) { e.aim = e.windA; e.moving = false; if ((e.wind -= dt) <= 0) { rivalSwing(e); e.atkCd = rand(0.7, 1.1) * (G.run ? 1 - 0.07 * G.run.floor : 1); } return; }
   if (tg) {
     const d = dist(e.x, e.y, tg.x, tg.y), a = angTo(e.x, e.y, tg.x, tg.y);
     e.aim = a;

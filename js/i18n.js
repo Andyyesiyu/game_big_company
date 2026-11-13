@@ -90,7 +90,7 @@ const STR = {
   asl_sub: ['Responsible scaling in progress', '正在负责任地加大力度'],
   q_sign: ['OK, OK! N+1! Here, signed!', '好好好！N+1！签了签了！'],
   boss_down: ['CEO SIGNED', 'CEO 签字了'],
-  boss_down_sub: ['Full health. A double upgrade is coming', '血量回满，接下来是双倍强化'],
+  boss_down_sub: ['Health back. A double upgrade is coming', '回一大口血，接下来是双倍强化'],
 
   w_stapler: ['Stapler', '订书机'],
   w_fan: ['Resignation Fan', '辞职信折扇'],

@@ -4,11 +4,12 @@
 // Every stage you clear pays a choice of three upgrades, and they stack until the run ends.
 // Lose and you keep half of what you carried; make all five sign and you keep the lot, plus a bonus.
 const FLOORS = ['pony', 'yiming', 'elon', 'sam', 'dario'];
-const BOSS_HP = [1.3, 1.8, 2.3, 2.9, 4]; // later CEOs meet a stronger you
+const BOSS_HP = [1.5, 2.1, 2.8, 3.6, 5]; // later CEOs meet a stronger you
+const BOSS_PACE = 0.06; // and leave less of a gap between attacks, this much less per floor
 // colleagues per wave, by level (0 intern, 1 regular, 2 grinder)
 const WAVE_RIVALS = [
-  [[0], [0, 0], [0, 1], [1, 1], [1, 1, 2]],
-  [[0, 1], [0, 1, 1], [1, 1, 2], [1, 2, 2], [1, 2, 2, 2]],
+  [[0, 0], [0, 1], [1, 1], [1, 1, 2], [1, 2, 2]],
+  [[0, 1], [1, 1, 1], [1, 1, 2, 2], [1, 2, 2, 2], [2, 2, 2, 2, 2]],
 ];
 const CLEAR_BONUS = 50000;
 
@@ -75,17 +76,17 @@ function edgeSpot(lo, hi) {
 function startWave(n) {
   const run = G.run, f = run.floor, id = FLOORS[f], pl = run.pl, tag = ++run.waveId;
   // everyone on a floor is tougher than on the one below
-  const enlist = (e) => { e.wave = tag; e.hp = e.maxhp = Math.round(e.maxhp * (e.type === 'rival' ? 1.3 + 0.35 * f : 1.2 + 0.5 * f)); };
+  const enlist = (e) => { e.wave = tag; e.hp = e.maxhp = Math.round(e.maxhp * (e.type === 'rival' ? 1.4 + 0.4 * f : 1.3 + 0.55 * f)); };
   let i = 0;
   const minion = (type) => { const s = edgeSpot(n === 1 ? 240 : 380, n === 1 ? 480 : 620), e = spawnEnemy(type, s.x, s.y); e.spawnT = 0.6 + 0.12 * i++; enlist(e); };
   const kinds = POI_GUARDS[id].filter((t) => t !== 'manager');
   if (n === 1) {
     // the company's own: its AI products and whoever runs them
     for (const t of POI_GUARDS[id]) minion(t);
-    for (let k = 0; k < f; k++) minion(pick(kinds));
+    for (let k = 0; k < 1 + f; k++) minion(pick(kinds));
   } else {
-    for (let k = 0; k < 4 + f; k++) minion(pick(kinds));
-    for (let k = 0; k < (f >= 3 ? 2 : 1); k++) minion('manager');
+    for (let k = 0; k < 5 + f; k++) minion(pick(kinds));
+    for (let k = 0; k < (f >= 2 ? 2 : 1); k++) minion('manager');
   }
   for (const lvl of WAVE_RIVALS[n - 1][f]) {
     const s = edgeSpot(520, 690), e = spawnRival(s.x, s.y, lvl);
@@ -132,7 +133,7 @@ function updateRun(dt) {
     if (left) return;
     // wave down: catch your breath, then pick an upgrade
     run.stage = 'cleared'; run.t = 1.2; run.calm = true;
-    healPlayer(Math.round(p.maxhp * 0.15));
+    healPlayer(Math.round(p.maxhp * 0.1));
     if (p.mods.waveArmor) p.armor = Math.min(100, p.armor + p.mods.waveArmor);
     stageDone();
   } else if (run.stage === 'cleared') {
