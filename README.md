@@ -79,8 +79,9 @@ shadow map, and the screen is kept awake during a match.
 
 **Loading and performance.** The page shows a splash at once and the menu as soon as the
 engine and game code have arrived; the model library is the last script on the page and
-swaps in when it has decoded. The models are trimmed hard (flat-shaded characters with no
-normals, simplified tree trunks, WebP textures), so the whole one-file build is about
+swaps in when it has decoded. The models are trimmed hard (characters stored without
+normals, which are worked out again at load so they are shaded smoothly; simplified tree
+trunks; WebP textures), so the whole one-file build is about
 3.4 MB. At run time each character is a single draw call, trees, bushes, rocks and grass
 are split into map cells so only what is in view is drawn, and the 3D view has four
 quality levels (pixel ratio, anti-aliasing, shadow size, glow) that the game moves

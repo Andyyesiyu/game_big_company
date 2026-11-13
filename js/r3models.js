@@ -80,6 +80,7 @@ R3.prepModels = function (lib) {
       }
     });
     mergeSkinned(g);
+    g.scene.traverse((m) => { if (m.isSkinnedMesh && !m.geometry.attributes.normal) { m.geometry.computeVertexNormals(); m.material.flatShading = false; m.material.needsUpdate = true; } });
     const b = new THREE.Box3().setFromObject(g.scene);
     g.userData.size = b.getSize(new THREE.Vector3()); g.userData.min = b.min.clone(); g.userData.center = b.getCenter(new THREE.Vector3());
   }
@@ -90,7 +91,7 @@ R3.prepModels = function (lib) {
 // more for its shadow. Join them into one mesh whose colours live on the vertices, and remember which vertices
 // belonged to which material so a copy can still be given its own skin tone, hair colour or outfit.
 function charMaterial() {
-  const m = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.85, metalness: 0 });
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
   // faces turned to the camera sit in shade under a high sun: lift them with a little of their own colour
   m.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * 0.24;'); };
   m.customProgramCacheKey = () => 'char';
@@ -130,6 +131,10 @@ function mergeSkinned(g) {
   geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
   geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  // The files carry no normals (they were dropped to keep the download small). Work them out here, averaged at
+  // every shared vertex, so the surface is shaded smoothly instead of as visible flat faces. Vertices are only
+  // shared within one material, so the seams between skin, hair and clothes stay crisp.
+  geo.computeVertexNormals();
   geo.userData.shared = true;
   const mat = charMaterial();
   mat.userData.shared = true;
