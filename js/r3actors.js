@@ -325,10 +325,12 @@ R3.syncActors = function (dt) {
     const j = jit(b), charging = b.mode === 'charge';
     R.g.visible = !b.gone;
     R.g.position.set(b.x + Math.sin(t * 95) * 5 * j, 0, b.y);
-    R.g.rotation.y = yaw(charging ? b.data.ca : angTo(b.x, b.y, p.x, p.y));
+    const intro = G.cine && G.cine.b === b;
+    R.g.rotation.y = yaw(intro ? Math.PI / 2 : charging ? b.data.ca : angTo(b.x, b.y, p.x, p.y));
     R.g.rotation.z = b.stun > 0 ? Math.sin(t * 16) * 0.14 : 0;
     if (R.model) {
-      if (b.down) animSet(R, 'SitDown', { once: true });
+      if (intro) animSet(R, G.cine.t < 0.9 ? 'Idle' : 'Victory', { speed: 1.1 });
+      else if (b.down) animSet(R, 'SitDown', { once: true });
       else if (b.topple > 1.2) animSet(R, 'Defeat', { once: true, speed: 2.6 });
       else if (b.topple > 0) animSet(R, 'StandUp', { once: true, speed: 1.15 });
       else if (b.stun > 0) animSet(R, 'RecieveHit');

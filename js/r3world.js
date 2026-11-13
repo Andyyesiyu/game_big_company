@@ -415,12 +415,21 @@ R3.unproject = function (px, py, z = 0) {
   const t = d.y < -1e-4 ? (z - o.y) / d.y : 4000 / (d.length() || 1);
   return { x: o.x + d.x * t, y: o.z + d.z * t };
 };
+R3.col3 = new THREE.Vector3();
 R3.updateCamera = function () {
   const zoom = 1 - View.zk * 1.6, portrait = View.W < View.H;
   const D = (portrait ? 700 : 540) * zoom, pitch = 0.56;
   const tx = View.cam.x - View.kx * 1.4 + rand(-1, 1) * View.shake * 0.9, ty = View.cam.y - View.ky * 2 + rand(-1, 1) * View.shake * 0.9;
-  this.cam.position.set(tx, D * Math.sin(pitch), ty + D * Math.cos(pitch));
-  this.cam.lookAt(tx, 34, ty - 110);
+  this.v.set(tx, D * Math.sin(pitch), ty + D * Math.cos(pitch)); this.v2.set(tx, 34, ty - 110);
+  const c = G.cine;
+  if (c) {
+    // the boss's entrance: swing round to a low close-up in front of them, pushing in slowly
+    const k = cineK(), b = c.b, f = c.t / c.dur, an = (f - 0.5) * 0.55, d = lerp(235, 170, f);
+    this.v.lerp(this.col3.set(b.x + Math.sin(an) * d, 50, b.y + Math.cos(an) * d), k);
+    this.v2.lerp(this.col3.set(b.x, 84, b.y), k);
+  }
+  this.cam.position.copy(this.v);
+  this.cam.lookAt(this.v2);
   this.cam.updateMatrixWorld();
 };
 

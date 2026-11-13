@@ -50,6 +50,11 @@
     background: radial-gradient(circle at 35% 30%, #fff3b8, #f2b01e 60%, #c98a12); box-shadow: 0 2px 0 #8a5a08; }
   .bank b { color: #ffe08a; font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; text-shadow: 0 2px 0 rgba(0,0,0,0.4); }
 
+  /* a stamp for every CEO you have made sign */
+  .stamps { display: flex; justify-content: center; gap: 10px; margin: 6px 0 2px; flex-wrap: wrap; }
+  .stamps span { display: grid; place-items: center; width: 58px; height: 58px; border-radius: 50%; border: 3px dashed #cfc8dc; color: #cfc8dc; font-size: 12px; font-weight: 900; transform: rotate(-8deg); }
+  .stamps span:nth-child(even) { transform: rotate(6deg); }
+  .stamps span.on { border: 5px double var(--hot); color: var(--hot); background: rgba(255,90,110,0.08); }
   button { font: inherit; color: var(--ink); cursor: pointer; border: 0; border-radius: 999px; }
   /* the big red button */
   button.big { display: block; margin: 22px auto 22px; padding: 17px 40px; min-width: 250px; font-size: 22px; font-weight: 900; letter-spacing: 0.1em;

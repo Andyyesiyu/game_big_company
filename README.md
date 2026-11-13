@@ -69,6 +69,13 @@ English and 中文 are both built in (toggle on the title screen).
 
 ## How a match works
 
+- **Objectives.** There is always one thing to do next, shown under your health with a
+  yellow arrow pointing the way and a reward for doing it: search two boxes, knock out
+  two rivals, then go and make the nearest CEO sign, then the next one.
+- **Promotions.** Knock-outs, boxes and signatures fill the ring around your weapon.
+  Each grade up (P5 to P10) adds health and damage and heals you.
+- **CEO entrances.** The first time you walk up to a CEO the fight pauses for a close-up.
+  Any attack key skips it. Each CEO you beat leaves a stamp on the title screen for good.
 - **Loot.** Stand next to a container to search it. Crates are everywhere; lockers sit at
   small work sites; safes are inside the five CEO plazas. Valuables come in six colour
   tiers, from a badge lanyard up to the red one: a **signed N+1 agreement**.
@@ -85,15 +92,15 @@ English and 中文 are both built in (toggle on the title screen).
 
 | Plaza | Boss | Signature moves | Guards → sidekick |
 |---|---|---|---|
-| Penguin Tower | 马化腾 · Pony | red-envelope fans, penguin squads, the gauntlet snap | penguins |
-| Infinite Scroll Inc. | 张一鸣 · Yiming | feed lanes sweeping the plaza, homing "recommended for you" notes, delayed gratification | **Doubao** → orders you a bubble tea now and then |
-| Hardcore Mars Corp. | Elon | rocket rain, the not-a-flamethrower, a truck charge that stuns him on the wall | drones |
-| AGI Soon Ltd. | Sam | GPU spirals, agent swarms, a funding round to interrupt, and the board fires him once | **GPT bot** → shoots at range for you |
-| Safety First Labs | Dario | orbiting shields, a 15,000-word essay beam, "I can't help with that" reflection, escalating ASL phases | **Claude crab** → pinches whatever gets close |
+| Penguin Tower | 马花藤 · Ponny | red-envelope fans, penguin squads, the gauntlet snap | penguins |
+| Infinite Scroll Inc. | 张二鸣 · Erming | feed lanes sweeping the plaza, homing "recommended for you" notes, delayed gratification | **Doubao** → orders you a bubble tea now and then |
+| Hardcore Mars Corp. | 马一龙 · Eelon | rocket rain, the not-a-flamethrower, a truck charge that stuns him on the wall | drones |
+| AGI Soon Ltd. | 奥特慢 · Samm | GPU spirals, agent swarms, a funding round to interrupt, and the board fires him once | **GPT bot** → shoots at range for you |
+| Safety First Labs | 大里奥 · Darioo | orbiting shields, a 15,000-word essay beam, "I can't help with that" reflection, escalating ASL phases | **Claude crab** → pinches whatever gets close |
 
 Weapons are melee and tiered: stapler → resignation-letter fan → mech keyboard →
 whiteboard → the Labor Law. Picking up a better one equips it automatically and also
-scales your skills. Plaid shirts are armour. Dario's safeguards orbit him at a distance:
+scales your skills. Plaid shirts are armour. Darioo's safeguards orbit him at a distance:
 slip between them to get into melee range.
 
 ## How it's drawn

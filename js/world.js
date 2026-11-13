@@ -329,7 +329,7 @@ function makePlayer() {
     dashT: 0, dashKind: '', dashDir: { x: 1, y: 0 }, dashHit: null, lungeT: 0, lvx: 0, lvy: 0,
     swingT: 0, swingMax: 1, swingA: 0, swingHit: true, chain: 0, chainT: 0, castT: 0, castKind: '',
     cd: { q: 0, e: 0, r: 0, d: 0 }, lock: null, moveTo: null, buf: 0, hbuf: 0, hold: 0, charge: 0, regenT: 0,
-    sta: 100, staT: 0, staFlash: 0, denyT: 0, mv: null, mvId: '', swingDir: 1, counterT: 0, afterDash: 0,
+    lvl: 1, xp: 0, opened: 0, sta: 100, staT: 0, staFlash: 0, denyT: 0, mv: null, mvId: '', swingDir: 1, counterT: 0, afterDash: 0,
     inv: 0, hurtT: 0, fireT: 0, teaCd: 0, zoneT: 0, hidden: false, outside: false,
     weapon: 'stapler',
     loot: { value: 0, counts: [0, 0, 0, 0, 0, 0] },
@@ -388,6 +388,66 @@ function nearestTarget(x, y, range) {
   }
   return best;
 }
+// ---------- getting promoted ----------
+// Knock-outs, boxes and signatures earn experience. Each grade up (P5, P6, ...) is more health and harder hits.
+const MAX_LVL = 6;
+const XP_NEED = (lvl) => 40 + lvl * 45;
+const gradeName = (lvl) => 'P' + (4 + lvl);
+function gainXp(n) {
+  const p = G.player;
+  if (!p || p.hp <= 0 || p.lvl >= MAX_LVL) return;
+  p.xp += n;
+  while (p.lvl < MAX_LVL && p.xp >= XP_NEED(p.lvl)) {
+    p.xp -= XP_NEED(p.lvl); p.lvl++;
+    p.maxhp += 10; p.hp = Math.min(p.maxhp, p.hp + 40); p.sta = 100;
+    banner(T('lvl_up', gradeName(p.lvl)), T('lvl_up_sub'), 1.8, '#ffe14d');
+    ring(p.x, p.y, 110, '#ffe14d', 0.5); ring(p.x, p.y, 60, '#fff', 0.35);
+    burst(p.x, p.y, 30, 26, ['#ffe14d', '#fff', '#ffb347'], { sp: 260, up: 380, life: 0.9, size: 6 });
+    Sfx.play('win');
+  }
+  if (p.lvl >= MAX_LVL) p.xp = 0;
+}
+
+// ---------- what to do next ----------
+// One objective at a time, each with a reward, so there is always something to walk towards:
+// open a couple of boxes, win a couple of fights, then go and make the nearest CEO sign. Then the next one.
+function questTarget(kind) {
+  const p = G.player, z = G.zone;
+  let best = null, bd = 1e9;
+  const see = (o, x = o.x, y = o.y) => { const d = dist(p.x, p.y, x, y); if (d < bd) { bd = d; best = o; } };
+  if (kind === 'loot') { for (const k of G.containers) if (!k.opened) see(k); }
+  else if (kind === 'fight') { for (const e of G.enemies) if (!e.dead && e.type === 'rival') see(e); }
+  else if (kind === 'boss') { for (const b of G.bosses) if (!b.down && dist(b.home.x + b.home.w / 2, b.home.y + b.home.h / 2, z.x, z.y) < z.r) see(b); }
+  else for (const e of G.exits) see(e);
+  return best;
+}
+function shortName(id) {
+  const parts = T('n_' + id).split(' · ');
+  return (LANG.zh && parts.find((s) => /[\u4e00-\u9fff]/.test(s))) || parts[0];
+}
+function questNow() {
+  const q = G.quest, p = G.player;
+  if (q.i === 0) return { kind: 'loot', text: T('qs_loot'), cur: p.opened - q.base, n: 2, reward: 'tea' };
+  if (q.i === 1) return { kind: 'fight', text: T('qs_fight'), cur: G.kills - q.base, n: 2, reward: 800 };
+  const b = questTarget('boss');
+  if (b) return { kind: 'boss', text: T('qs_boss', shortName(b.id)), cur: G.signed - q.base, n: 1, reward: 3000, tg: b };
+  return { kind: 'exit', text: T('qs_exit'), cur: 0, n: 1, reward: 0 };
+}
+function updateQuest(dt) {
+  const q = G.quest, p = G.player;
+  q.doneT = Math.max(0, q.doneT - dt);
+  if ((q.scan -= dt) > 0 && q.now) { q.now.cur = q.now.kind === 'loot' ? p.opened - q.base : q.now.kind === 'fight' ? G.kills - q.base : q.now.kind === 'boss' ? G.signed - q.base : 0; }
+  else { q.scan = 0.4; q.now = questNow(); q.tg = q.now.tg || questTarget(q.now.kind); }
+  const s = q.now;
+  if (s.kind === 'exit' || s.cur < s.n) return;
+  if (s.reward === 'tea') p.tea = Math.min(6, p.tea + 1); else p.loot.value += s.reward;
+  floater(p.x, p.y, 118, T('qs_done') + (s.reward === 'tea' ? '  ' + T('tea') + ' +1' : '  +' + s.reward), '#ffe14d', 20, 1.6);
+  Sfx.play('safe');
+  gainXp(25);
+  q.i++; q.doneT = 1.6; q.scan = 0;
+  q.base = q.i === 1 ? G.kills : G.signed;
+}
+
 // ---------- action combat ----------
 function forTargets(fn) {
   for (const e of G.enemies) if (!e.dead && e.spawnT <= 0) fn(e);
@@ -421,7 +481,7 @@ function hitTarget(t, dmg, o) {
     return false;
   }
   const crit = !o.nocrit && (o.crit || rand() < 0.15 + (WEAPONS[p.weapon].crit || 0));
-  dmg = Math.round(dmg * (crit ? 1.7 : 1) * rand(0.92, 1.08));
+  dmg = Math.round(dmg * (crit ? 1.7 : 1) * (1 + 0.07 * (p.lvl - 1)) * rand(0.92, 1.08));
   const big = o.heavy || crit, a = o.a, hz = 30 + (t.z || 0);
   // --- the impact ---
   floater(t.x + rand(-14, 14), t.y, 64 + rand(26), (crit ? T('crit') + ' ' : '') + dmg, crit ? '#ffe14d' : '#fff', crit ? 26 : 16 + Math.min(9, dmg / 7), 0.8);
@@ -787,6 +847,7 @@ function killEnemy(e, byPlayer) {
   e.dead = true;
   if (byPlayer) launchCorpse(e); else poof(e.x, e.y);
   if (!byPlayer) return;
+  gainXp(12);
   Sfx.play('kill');
   if (rand() < 0.14) dropItem(e.x, e.y, { kind: 'tea' });
   else if (rand() < 0.2) dropItem(e.x, e.y, rollVal(0, 1));
@@ -945,6 +1006,7 @@ function killRival(e, src, cause) {
   if (src === p) launchCorpse(e); else poof(e.x, e.y);
   if (src === p) {
     G.kills++;
+    gainXp(40 + e.lvl * 15);
     Sfx.play('kill');
     feed(T('feed_you', name), '#ffe08a');
     floater(e.x, e.y, 90, T('optimized'), '#ffb3b3', 15, 1.3);
@@ -1259,6 +1321,7 @@ const WEAPON_ROLL = { crate: ['fan', 'fan', 'fan', 'keyboard', 'keyboard', 'boar
 const rollWeapon = (kind) => ({ kind: 'weapon', id: pick(WEAPON_ROLL[kind]) });
 function openContainer(k) {
   k.opened = true;
+  G.player.opened++; gainXp(10);
   Sfx.play('open');
   burst(k.x, k.y, 20, 10, ['#fff', '#ffe08a'], { sp: 120, up: 200 });
   const out = (it) => dropItem(k.x, k.y + 8, it);

@@ -1,13 +1,14 @@
 'use strict';
 // ---------- meta: what you carried out so far ----------
 const Bank = {
-  money: 0, best: 0, runs: 0,
+  money: 0, best: 0, runs: 0, ceo: [], // ceo: every boss you have ever made sign
   load() {
     try { Object.assign(this, JSON.parse(localStorage.getItem('layoff_games_bank') || '{}')); } catch (e) { /* storage unavailable: play without a bank */ }
     this.money = +this.money || 0; this.best = +this.best || 0; this.runs = +this.runs || 0;
+    if (!Array.isArray(this.ceo)) this.ceo = [];
   },
   save() {
-    try { localStorage.setItem('layoff_games_bank', JSON.stringify({ money: this.money, best: this.best, runs: this.runs })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem('layoff_games_bank', JSON.stringify({ money: this.money, best: this.best, runs: this.runs, ceo: this.ceo })); } catch (e) { /* ignore */ }
   },
 };
 const KITS = [
@@ -52,7 +53,8 @@ function startMatch(kit) {
       if (s && dist(s.x, s.y, p.x, p.y) > 750) { spawnRival(s.x, s.y); break; }
     }
   }
-  Object.assign(G, { state: 'play', time: 0, kills: 0, signed: 0, exT: 0, exitsOpen: false, result: null, lastHit: '' });
+  Object.assign(G, { state: 'play', time: 0, kills: 0, signed: 0, exT: 0, exitsOpen: false, result: null, lastHit: '', cine: null });
+  G.quest = { i: 0, base: 0, doneT: 0, scan: 0, now: null, tg: null };
   View.cam.x = p.x; View.cam.y = p.y;
   UI.hide();
   banner(T('drop_title', G.total), T('drop_sub'), 3.2, '#ffe08a');
@@ -106,9 +108,7 @@ function update(dt) {
     G.boss = near;
     if (near && !near.met) {
       near.met = true;
-      banner(T('n_' + near.id), T('t_' + near.id), 2.8, THEMES[near.id].neon);
-      say(near, T('q_' + near.id + '_intro'), 3);
-      Sfx.play('boss');
+      startCine(near);
     }
   }
   updateBullets(dt);
@@ -121,6 +121,7 @@ function update(dt) {
   updateContainers(dt);
   updatePickups(dt);
   updatePets(dt);
+  updateQuest(dt);
   updateFx(dt);
   if (G.state !== 'play') return;
 
@@ -130,6 +131,45 @@ function update(dt) {
   else G.exT = Math.max(0, G.exT - dt * 2);
   if (aliveRivals() === 0) return endMatch('winner');
   updateCamera(dt, p.x + p.mvx * 0.2, p.y + p.mvy * 0.16);
+}
+
+// ---------- the boss's entrance ----------
+// The first time you walk up to a CEO the fight holds its breath: the camera goes in close, the name comes up.
+function startCine(b) {
+  const p = G.player;
+  G.cine = { b, t: 0, dur: 2.7 };
+  p.moving = false; p.mvx = p.mvy = 0; p.charge = 0; p.hold = 0; p.buf = p.hbuf = 0;
+  G.banner = null;
+  Sfx.play('boss');
+}
+const cineK = () => { const c = G.cine; if (!c) return 0; const k = clamp(Math.min(c.t / 0.5, (c.dur - c.t) / 0.4), 0, 1); return k * k * (3 - 2 * k); };
+function updateCine(dt) {
+  const c = G.cine;
+  c.t += dt; c.b.t += dt;
+  // any button skips it
+  if (c.t > 0.5 && c.t < c.dur - 0.4 && (Input.take('lclick') | Input.take('Space') | Input.take('btn_atk') | Input.take('Escape') | Input.take('KeyJ'))) c.t = c.dur - 0.4;
+  updateCamera(dt, lerp(G.player.x, c.b.x, cineK()), lerp(G.player.y, c.b.y - 30, cineK()));
+  updateFx(dt * 0.3);
+  if (c.t < c.dur) return;
+  G.cine = null;
+  Input.pressed = {};
+  say(c.b, T('q_' + c.b.id + '_intro'), 3);
+}
+function drawCine() {
+  const c = G.cine, W = View.W, H = View.H, u = clamp(Math.min(W, H) / 720, 0.72, 1.25), k = cineK(), col = THEMES[c.b.id].neon;
+  const bh = H * 0.13 * k;
+  ctx.fillStyle = '#15121f'; ctx.fillRect(0, 0, W, bh); ctx.fillRect(0, H - bh, W, bh);
+  const a = clamp((c.t - 0.4) / 0.3, 0, 1) * clamp((c.dur - c.t) / 0.35, 0, 1);
+  if (a <= 0) return;
+  const size = Math.min(66 * u, W * 0.088), x = W * 0.07 - (1 - a) * 70, y = H - bh - size * 1.75;
+  ctx.globalAlpha = a;
+  ctx.fillStyle = col; ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  ctx.font = `900 ${Math.round(size)}px ${FONT}`;
+  const w = ctx.measureText(T('n_' + c.b.id)).width;
+  ctx.beginPath(); ctx.moveTo(x - 6, y + size * 0.72); ctx.lineTo(x + w * a + 26, y + size * 0.72); ctx.lineTo(x + w * a + 12, y + size * 0.72 + 9 * u); ctx.lineTo(x - 20, y + size * 0.72 + 9 * u); ctx.closePath(); ctx.fill(); ctx.stroke();
+  hudText(T('n_' + c.b.id), x, y + size * 0.2, size, '#fff', 'left', 900);
+  hudText(T('t_' + c.b.id), x + 2, y + size * 0.72 + 34 * u, Math.min(24 * u, W * 0.045), col, 'left', 900);
+  ctx.globalAlpha = 1;
 }
 
 function updateCamera(dt, tx, ty) {
@@ -403,7 +443,7 @@ function drawPickup(k) {
 }
 
 function render() {
-  View.S = View.S0 * (1 + View.zk);
+  View.S = View.S0 * (1 + View.zk) * (1 + cineK() * 0.55);
   const S = View.S, p = G.player, t = G.t;
   // with the lighting pass on, the world goes to an offscreen canvas and through the shader
   const fx = Post.ok && Settings.fx;
@@ -537,7 +577,7 @@ function render() {
     ctx.fillStyle = vg; ctx.fillRect(0, 0, View.W, View.H);
   }
 
-  if (G.state === 'play' || G.state === 'paused' || G.state === 'over') drawHUD();
+  if (G.cine) drawCine(); else if (G.state === 'play' || G.state === 'paused' || G.state === 'over') drawHUD();
 }
 
 // ---------- HUD ----------
@@ -624,12 +664,36 @@ function drawHUD() {
   if (p.armor > 0) tube(gx, pad + 42 * u, gw * 0.6, 6 * u, p.armor / 100, '#a9d2ff', '#4a8fe0', 0, 0);
   knob(mcx, mcy, mr, TIER[WEAPONS[p.weapon].tier], false);
   ctx.save(); ctx.translate(mcx, mcy); ctx.scale(1.35 * u, 1.35 * u); ink(ctx, 1.6); drawWeapon(ctx, p.weapon, 1.2); ctx.restore();
-  let ly = pad + mr * 2 + 18 * u;
+  // your grade, with a ring that fills towards the next promotion
+  const xf = p.lvl >= MAX_LVL ? 1 : p.xp / XP_NEED(p.lvl);
+  ctx.lineCap = 'round'; ctx.strokeStyle = INK; ctx.lineWidth = 6.5 * u; ctx.beginPath(); ctx.arc(mcx, mcy, mr + 2 * u, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = '#5a5470'; ctx.lineWidth = 3.5 * u; ctx.beginPath(); ctx.arc(mcx, mcy, mr + 2 * u, 0, TAU); ctx.stroke();
+  if (xf > 0.01) { ctx.strokeStyle = '#ffe14d'; ctx.beginPath(); ctx.arc(mcx, mcy, mr + 2 * u, -Math.PI / 2, -Math.PI / 2 + TAU * xf); ctx.stroke(); }
+  plate(mcx - 16 * u, mcy + mr - 7 * u, 32 * u, 16 * u, 8 * u);
+  hudText(gradeName(p.lvl), mcx, mcy + mr + 1.5 * u, 11 * u, '#ffe14d', 'center', 900);
+  let ly = pad + mr * 2 + 26 * u;
   coin(pad + 10 * u, ly, 10 * u);
   hudText(money(p.loot.value).replace(/^[¥$]/, ''), pad + 26 * u, ly + 1, 19 * u, '#ffe08a', 'left', 900);
   let px = pad + 26 * u + ctx.measureText(money(p.loot.value).replace(/^[¥$]/, '')).width + 12 * u;
   for (let i = 2; i < 6; i++) for (let k = 0; k < Math.min(p.loot.counts[i], 5); k++) { ctx.fillStyle = TIER[i]; ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(px, ly - 6 * u, 8 * u, 12 * u, 2); ctx.fill(); ctx.stroke(); px += 6 * u; }
   ly += 22 * u;
+  // the current objective: what to do, how far along, and what it pays
+  const q = G.quest, qs = q && q.now;
+  if (qs && G.state === 'play') {
+    const done = q.doneT > 0, qw = clamp(W * 0.32, 180 * u, 250 * u), qh = 44 * u, qy = ly - 6 * u;
+    if (done) { ctx.save(); ctx.shadowColor = '#7df0a0'; ctx.shadowBlur = 18; ctx.fillStyle = '#7df0a0'; ctx.beginPath(); ctx.roundRect(pad, qy, qw, qh, 10 * u); ctx.fill(); ctx.restore(); }
+    plate(pad, qy, qw, qh, 10 * u);
+    ctx.fillStyle = done ? '#7df0a0' : '#ffe14d'; ctx.strokeStyle = INK; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(pad + 20 * u, qy + qh / 2, 11 * u, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = INK; ctx.font = `900 ${Math.round(15 * u)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(done ? '✓' : '!', pad + 20 * u, qy + qh / 2 + 1);
+    hudText(done ? T('qs_done') : qs.text, pad + 38 * u, qy + 14 * u, 14 * u, done ? '#7df0a0' : '#fff', 'left', 900);
+    if (!done) {
+      for (let i = 0; i < qs.n; i++) { ctx.fillStyle = i < qs.cur ? '#ffe14d' : '#231d33'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(pad + 38 * u + i * 16 * u, qy + 26 * u, 12 * u, 9 * u, 3); ctx.fill(); ctx.stroke(); }
+      if (qs.reward === 'tea') { ctx.save(); ctx.translate(pad + qw - 30 * u, qy + 30 * u); ctx.scale(0.5 * u, 0.5 * u); drawLootIcon(ctx, { kind: 'tea' }); ctx.restore(); hudText('+1', pad + qw - 10 * u, qy + 31 * u, 12 * u, '#ffd0d6', 'right', 900); }
+      else if (qs.reward) { hudText('+' + qs.reward, pad + qw - 10 * u, qy + 31 * u, 12 * u, '#ffe08a', 'right', 900); coin(pad + qw - 16 * u - ctx.measureText('+' + qs.reward).width, qy + 30 * u, 6 * u); }
+    }
+    ly += qh + 8 * u;
+  }
   if (p.hidden) { hudText(T('hud_hidden'), pad, ly, 11 * u, '#b9f59a'); ly += 18 * u; }
   // kill feed
   ly += 4 * u;
@@ -663,6 +727,18 @@ function drawHUD() {
   // pointers
   if (G.state === 'play') {
     if (p.outside) edgeArrow(z.x, z.y, '#f3b8ff', T('hud_safe'));
+    // the way to the current objective: an arrow at the screen edge, or a marker over it once it is in view
+    const qt = G.quest.tg, qn = G.quest.now;
+    if (qt && qn && qn.kind !== 'exit' && !p.outside) {
+      const qd = dist(p.x, p.y, qt.x, qt.y);
+      edgeArrow(qt.x, qt.y, '#ffe14d', Math.round(qd / 10) + 'm');
+      const sp = toScreen(qt.x, qt.y, qn.kind === 'boss' ? 150 : 96);
+      if (qd > 110 && sp.ok !== false && sp.x > 40 && sp.x < W - 40 && sp.y > 70 && sp.y < H - 90 && !(qn.kind === 'boss' && G.boss)) {
+        const by = sp.y + Math.sin(G.t * 6) * 5 * u;
+        ctx.fillStyle = '#ffe14d'; ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+        ctx.beginPath(); ctx.moveTo(sp.x - 11 * u, by - 16 * u); ctx.lineTo(sp.x + 11 * u, by - 16 * u); ctx.lineTo(sp.x, by); ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+    }
     if (G.exitsOpen) {
       let ex = null, xd = 1e9;
       for (const e of G.exits) { const d = dist(p.x, p.y, e.x, e.y); if (d < xd) { xd = d; ex = e; } }
@@ -920,6 +996,7 @@ function showTitle() {
     <h2>${T('title2')}</h2>
     <button class="big" data-act="kits">${T('start')}</button>
     <div class="bank"><i></i><b>${money(Bank.money)}</b></div>
+    <div class="stamps">${['pony', 'yiming', 'elon', 'sam', 'dario'].map((id) => `<span class="${Bank.ceo.includes(id) ? 'on' : ''}">${shortName(id)}</span>`).join('')}</div>
     <div class="row"><button class="ghost" data-act="how">${T('how')}</button></div>
     ${optRow()}
     <p class="disc">${T('disclaimer')}</p>`);
@@ -1025,7 +1102,8 @@ function frame(ts) {
   G.day = lerp(G.day, dayGoal, 0.02);
   if (G.state === 'play') {
     // hit-stop: the world freezes for a few frames on a solid hit
-    if (G.hitstop > 0) { G.hitstop -= dt; updateFx(dt * 0.25); } else update(dt);
+    if (G.cine) updateCine(dt);
+    else if (G.hitstop > 0) { G.hitstop -= dt; updateFx(dt * 0.25); } else update(dt);
   } else if (G.state === 'menu') {
     updateFx(dt);
     updateCamera(dt, ARENA.w / 2 + Math.sin(G.t * 0.07) * 1300, ARENA.h / 2 + Math.cos(G.t * 0.05) * 1100);
@@ -1041,7 +1119,7 @@ function frame(ts) {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.clearRect(0, 0, View.W, View.H);
     if (G.flash) { ctx.fillStyle = `rgba(${G.flash.color},${G.flash.a * (G.flash.t / G.flash.max)})`; ctx.fillRect(0, 0, View.W, View.H); }
-    if (G.state === 'play' || G.state === 'paused' || G.state === 'over') { R3.overlay(); drawHUD(); }
+    if (G.cine) drawCine(); else if (G.state === 'play' || G.state === 'paused' || G.state === 'over') { R3.overlay(); drawHUD(); }
   } else render();
   requestAnimationFrame(frame);
 }
