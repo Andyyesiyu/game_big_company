@@ -150,8 +150,10 @@ with the Graphics button in the menu.
 | `js/r3actors.js` | 3D renderer: character and creature rigs, per-frame sync of everything that moves, effects, the 2D overlay |
 | `js/r3models.js` | 3D renderer: loads the model library, animated character rigs, the bosses' looks, model trees, desks and containers |
 | `js/r3office.js` | 3D renderer: the office buildings (curtain-wall textures, lobbies, the five headquarters) |
-| `assets/models.js` | the model library: 26 trimmed GLB files as base64 (about 7 MB), so the game still runs from `file://` |
-| `tools/build-models.mjs` | how `assets/models.js` was made from the source packs (needs the downloads listed in CREDITS.md) |
+| `assets/models/` | the 26 models as GLB files (about 5 MB) |
+| `assets/models.js` | the same models packed as base64 into one script, which is what the game loads, so it still runs from `file://` and as a single file |
+| `tools/pack-models.js` | rebuilds `assets/models.js` from `assets/models/*.glb` |
+| `tools/build-models.mjs` | how the GLB files were trimmed from the original packs (needs the downloads listed in CREDITS.md) |
 | `vendor/` | Three.js r149 plus its glTF loader and SkeletonUtils (MIT), vendored so the game runs offline |
 | `js/world.js` | game state, map generation, action combat (combos, skills, hit feel), loot, rivals' AI, the circle, hazards, sidekicks |
 | `js/bosses.js` | boss framework plus the five attack decks |

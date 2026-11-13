@@ -20,9 +20,30 @@ const BOSS_LOOK = {
 R3.loadModels = function (done) {
   if (!this.ok || typeof MODEL_B64 === 'undefined' || !THREE.GLTFLoader || !THREE.SkeletonUtils) return;
   const loader = new THREE.GLTFLoader(), names = Object.keys(MODEL_B64), lib = {};
+  // The stock loader turns each embedded texture into a blob: URL and fetch()es it, which a hosted page's
+  // content policy can forbid. Decode the image bytes directly instead: remember which blob each URL was
+  // made from, and hand the loader a texture loader that reads the blob without touching the network.
+  const blobs = new Map(), mkUrl = URL.createObjectURL;
+  URL.createObjectURL = function (b) { const u = mkUrl.call(URL, b); blobs.set(u, b); return u; };
+  const restore = () => { URL.createObjectURL = mkUrl; };
+  const direct = {
+    isImageBitmapLoader: true,
+    load(url, onLoad, onProgress, onError) {
+      const b = blobs.get(url);
+      if (!b) return onError(new Error('no image data'));
+      const viaImage = () => { // older browsers: a data: URL in an <img>
+        const fr = new FileReader();
+        fr.onload = () => { const im = new Image(); im.onload = () => onLoad(im); im.onerror = onError; im.src = fr.result; };
+        fr.onerror = onError; fr.readAsDataURL(b);
+      };
+      if (window.createImageBitmap) createImageBitmap(b).then(onLoad, viaImage); else viaImage();
+    },
+  };
+  loader.register((parser) => { parser.textureLoader = direct; return { name: 'INLINE_TEXTURES' }; });
   let left = names.length, failed = false;
   const fin = () => {
     if (--left) return;
+    restore();
     if (failed || !lib.Casual_Male || !lib.Robot) return;
     try { this.prepModels(lib); this.models = lib; done(); } catch (e) { if (window.console) console.warn('Models unusable, keeping the built-in shapes:', e.message); }
   };

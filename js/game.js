@@ -607,7 +607,10 @@ function edgeArrow(wx, wy, color, label) {
   if (px > m && px < W - m && py > m + 40 && py < H - m - 40) return;
   const a = Math.atan2(py - H / 2, px - W / 2);
   const k = Math.min((W / 2 - m) / Math.abs(Math.cos(a) || 1e-6), (H / 2 - m - 40) / Math.abs(Math.sin(a) || 1e-6));
-  const x = W / 2 + Math.cos(a) * k, y = H / 2 + Math.sin(a) * k;
+  const x = W / 2 + Math.cos(a) * k, hu = hudU();
+  let y = H / 2 + Math.sin(a) * k;
+  // keep clear of the status block and the minimap in the top corners
+  if ((x < 290 * hu + View.safe.l || x > W - 190 * hu - View.safe.r) && y < 215 * hu + View.safe.t) y = 215 * hu + View.safe.t;
   ctx.save(); ctx.translate(x, y); ctx.rotate(a);
   ctx.fillStyle = color; ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
   ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-8, -11); ctx.lineTo(-3, 0); ctx.lineTo(-8, 11); ctx.closePath(); ctx.fill(); ctx.stroke();
